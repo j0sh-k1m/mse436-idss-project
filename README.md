@@ -33,3 +33,5 @@
 ## Team
 
 ## AI Use Disclosure
+
+AID Statement: Artificial Intelligence Tool: Claude, Claude Code, Cursor; Data Collection Method: Finding sources of MLB data; Execution: Implementing logic and ideas created by the team through writing code.

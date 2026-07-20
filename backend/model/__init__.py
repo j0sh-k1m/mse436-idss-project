@@ -1,1 +1,1 @@
-"""Core decision-support models for ratings, positions, and batting order."""
+"""Core decision-support models for player ratings and batting order."""

@@ -1,7 +1,29 @@
 """Backend API entry point.
 
-Define the HTTP endpoints the React frontend will call to submit player data,
-request optimized positions and batting orders, and receive model results.
-This module should handle API concerns such as request validation and CORS,
-then delegate all decision logic to modules in ``model``.
+FastAPI app the React frontend calls to submit player data and receive
+optimized batting orders. This module handles API concerns (request
+validation, CORS) and delegates all decision logic to modules in ``model``.
+
+Run locally with:
+
+    uvicorn app:app --reload --port 8000
 """
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Softball Lineup Coach API")
+
+# The Vite dev server runs on port 5173 by default.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}

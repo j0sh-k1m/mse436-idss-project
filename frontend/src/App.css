@@ -393,188 +393,101 @@
   color: var(--ink);
 }
 
-/* Positions page — the diamond */
+/* Batting order page */
 
-.position-field {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 24px;
-  align-items: start;
-}
-
-.diamond-wrap {
-  position: relative;
-  width: 100%;
-  max-width: 640px;
-  aspect-ratio: 1 / 1;
-  margin: 0 auto;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 4px 16px rgba(30, 36, 32, 0.25);
-}
-
-.diamond-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.diamond-grass {
-  fill: var(--field-green);
-}
-
-.diamond-foul-line {
-  stroke: var(--chalk);
-  stroke-width: 3;
-}
-
-.diamond-dirt {
-  fill: var(--clay);
-  stroke: var(--clay-dark);
-  stroke-width: 2;
-}
-
-.diamond-basepath {
-  fill: none;
-  stroke: var(--chalk);
-  stroke-width: 2;
-  opacity: 0.85;
-}
-
-.diamond-mound {
-  fill: var(--clay-dark);
-  stroke: var(--chalk);
-  stroke-width: 2;
-}
-
-.diamond-rubber,
-.diamond-base,
-.diamond-home {
-  fill: var(--chalk);
-  stroke: var(--ink);
-  stroke-width: 1;
-}
-
-.position-slot {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.position-label {
-  position: relative;
-  z-index: 2;
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--chalk);
-  background: rgba(30, 36, 32, 0.55);
-  padding: 1px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-.position-empty {
-  position: relative;
-  z-index: 2;
-  width: 74px;
-  height: 44px;
-  border: 2px dashed rgba(247, 245, 239, 0.6);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.6rem;
-  color: var(--chalk-dim);
-  text-align: center;
-  padding: 4px;
-}
-
-.position-slot.drag-over .position-empty,
-.position-slot.drag-over .position-chip {
-  outline: 3px solid var(--lights);
-  outline-offset: 2px;
-}
-
-.position-chip {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--chalk);
-  border: 2px solid var(--field-green-dark);
-  border-radius: 999px;
-  padding: 4px 6px 4px 4px;
-  cursor: grab;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-  max-width: 195px;
-}
-
-.chip-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.alternative-note {
-  position: relative;
-  z-index: 1;
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.55rem;
-  color: var(--ink);
-  background: var(--lights);
-  padding: 1px 5px;
-  border-radius: 3px;
-  text-align: center;
-  white-space: nowrap;
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.bench {
+.strategy-panel {
   background: var(--chalk-dim);
   border: 1px solid var(--ink-soft);
   border-radius: 10px;
-  padding: 16px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
 }
 
-.bench-list {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
+.strategy-panel h3 {
+  margin: 0 0 12px;
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.preset-btn {
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  background: var(--chalk);
+  color: var(--ink);
+  border: 1px solid var(--ink-soft);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.preset-btn:hover:not(:disabled) {
+  border-color: var(--field-green);
+}
+
+.preset-btn.active {
+  background: var(--field-green);
+  border-color: var(--field-green-dark);
+  color: var(--chalk);
+}
+
+.preset-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.weight-sliders {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 20px;
+  margin-bottom: 16px;
+}
+
+.weight-slider {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.bench-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--chalk);
-  border: 1px solid var(--ink-soft);
-  border-radius: 999px;
-  padding: 6px 10px;
-  cursor: grab;
-}
-
-.bench-empty {
+  gap: 4px;
+  font-size: 0.85rem;
   color: var(--ink-soft);
-  font-size: 0.9rem;
-  margin: 12px 0 0;
 }
 
-/* Batting order page */
+.weight-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.weight-value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.weight-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--field-green);
+}
+
+.strategy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.strategy-guard {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
 
 .batting-order-list {
   list-style: none;
@@ -648,14 +561,6 @@
 
   .roster-grid {
     grid-template-columns: 1fr;
-  }
-
-  .position-field {
-    grid-template-columns: 1fr;
-  }
-
-  .bench {
-    order: 2;
   }
 
   .batting-row {

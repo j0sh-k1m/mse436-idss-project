@@ -1,23 +1,22 @@
-# Softball Lineup & Position IDSS
+# Softball Lineup Coach IDSS
 
 ## Project structure
 
 ```
 ├── backend/                 Python API and decision-support model
-│   ├── app.py               Backend entry point (API / server)
+│   ├── app.py               FastAPI entry point (API / server)
 │   ├── requirements.txt     Python dependencies
 │   ├── model/               Core IDSS logic (no UI code)
-│   │   ├── ratings.py       Convert raw stats → 1–5 skill ratings
-│   │   ├── assignment.py    Position optimization (Hungarian algorithm)
-│   │   └── batting_order.py Batting order logic
+│   │   ├── ratings.py       Map coach 1–5 trait ratings → model features
+│   │   └── batting_order.py Batting order slot-scoring model
 │   └── data/
 │       ├── raw/             Downloaded MLB datasets (gitignored)
-│       └── processed/       Cleaned / converted training data
+│       └── processed/       Learned model parameters (slot_scoring.json)
 │
 ├── frontend/                React UI (Vite scaffold)
 │
 ├── notebooks/               Exploration and prototyping
-│   └── exploration.ipynb
+│   └── slot_scoring_model.ipynb
 │
 └── docs/                    Project documents (proposal, reports, etc.)
 ```

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api/mockApi'
 
+const DEFAULT_WEIGHTS = { trad: 1.0, power: 0.0, speed: 0.0, offense: 0.3 }
+
 function diffOrder(prev, next) {
   const changes = []
   const len = Math.max(prev.length, next.length)
@@ -20,6 +22,9 @@ export function useBattingOrder() {
   const [changes, setChanges] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [presets, setPresets] = useState({})
+  const [activePreset, setActivePreset] = useState('Balanced')
+  const [weights, setWeights] = useState(DEFAULT_WEIGHTS)
 
   const applyResult = useCallback((result) => {
     setOrder(result.order)
@@ -49,19 +54,51 @@ export function useBattingOrder() {
     refresh()
   }, [refresh])
 
+  useEffect(() => {
+    api
+      .getPresets()
+      .then((loaded) => {
+        setPresets(loaded)
+        const balanced = loaded.Balanced
+        if (balanced) {
+          setWeights({ ...balanced })
+          setActivePreset('Balanced')
+        }
+      })
+      .catch((err) => setError(err.message || 'Failed to load strategy presets'))
+  }, [])
+
+  const selectPreset = useCallback(
+    (name) => {
+      const presetWeights = presets[name]
+      if (!presetWeights) return
+      setActivePreset(name)
+      setWeights({ ...presetWeights })
+    },
+    [presets],
+  )
+
+  const setWeight = useCallback((key, value) => {
+    setActivePreset(null)
+    setWeights((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
   const generate = useCallback(() => {
     setLoading(true)
     setError(null)
     const previous = order
+    const strategy = activePreset
+      ? { preset: activePreset }
+      : { weights }
     return api
-      .generateBattingOrder(locked)
+      .generateBattingOrder(locked, strategy)
       .then((result) => {
         applyResult(result)
         setChanges(diffOrder(previous, result.order))
       })
       .catch((err) => setError(err.message || 'Failed to generate batting order'))
       .finally(() => setLoading(false))
-  }, [locked, order, applyResult])
+  }, [locked, order, applyResult, activePreset, weights])
 
   const reorder = useCallback((fromIndex, toIndex) => {
     setOrder((prev) => {
@@ -112,6 +149,11 @@ export function useBattingOrder() {
     changes,
     loading,
     error,
+    presets,
+    activePreset,
+    weights,
+    selectPreset,
+    setWeight,
     refresh,
     generate,
     reorder,

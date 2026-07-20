@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import RosterPage from './pages/RosterPage'
-import PositionsPage from './pages/PositionsPage'
 import BattingOrderPage from './pages/BattingOrderPage'
 import './App.css'
 
 const TABS = [
   { id: 'roster', label: 'Roster', Component: RosterPage },
-  { id: 'positions', label: 'Positions', Component: PositionsPage },
   { id: 'batting-order', label: 'Batting Order', Component: BattingOrderPage },
 ]
 
@@ -43,7 +41,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Softball Lineup &amp; Position IDSS</p>
+        <p>Softball Lineup Coach IDSS</p>
       </footer>
     </div>
   )

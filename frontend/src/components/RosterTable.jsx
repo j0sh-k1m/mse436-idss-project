@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import PlayerCard from './PlayerCard'
 
-const RATING_KEYS = ['hitting', 'fielding', 'throwing', 'speed']
+const RATING_KEYS = ['contact', 'power', 'discipline', 'speed']
 const RATING_OPTIONS = [1, 2, 3, 4, 5]
-const EMPTY_FORM = { name: '', hitting: 3, fielding: 3, throwing: 3, speed: 3 }
+const EMPTY_FORM = { name: '', contact: 3, power: 3, discipline: 3, speed: 3 }
 
 export default function RosterTable({ players, onAdd, onRemove, busy }) {
   const [form, setForm] = useState(EMPTY_FORM)
@@ -18,9 +18,9 @@ export default function RosterTable({ players, onAdd, onRemove, busy }) {
     onAdd({
       name: form.name.trim(),
       ratings: {
-        hitting: form.hitting,
-        fielding: form.fielding,
-        throwing: form.throwing,
+        contact: form.contact,
+        power: form.power,
+        discipline: form.discipline,
         speed: form.speed,
       },
     })

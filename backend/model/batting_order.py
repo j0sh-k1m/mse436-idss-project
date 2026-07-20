@@ -68,6 +68,53 @@ def blended_matrix(features, weights):
     return sum(w * mats[k] for k, w in weights.items())
 
 
+def starter_values(features, weights):
+    """Strategy-weighted value of each player for making the starting nine.
+
+    Uses the same ingredients as the slot model (closest-prototype fit, power,
+    speed, overall OBP+SLG quality), blended with the user's weights, so an
+    Aggressive strategy prefers different bench cutoffs than Small-ball.
+    """
+    features = np.asarray(features, dtype=float)
+    Z = (features - SCALER_MEAN) / SCALER_STD
+
+    dist = np.sqrt(((Z[:, None, :] - PROTOTYPES[None, :, :]) ** 2).sum(axis=2))
+    trad = minmax(-dist.min(axis=1))
+    power = minmax(Z[:, FEATURES.index("iso")])
+    speed = minmax(Z[:, FEATURES.index("sb_pg")])
+    offense = minmax(Z[:, FEATURES.index("obp")] + Z[:, FEATURES.index("slg")])
+
+    return (
+        weights.get("trad", 0.0) * trad
+        + weights.get("power", 0.0) * power
+        + weights.get("speed", 0.0) * speed
+        + weights.get("offense", 0.0) * offense
+    )
+
+
+def select_starters(n_players, values, n_slots=N_SLOTS, must_include=None):
+    """Pick ``n_slots`` starter indices from a larger roster.
+
+    Locked players in ``must_include`` are always kept; the remaining seats
+    go to the highest ``values``. Returns starter indices in descending
+    value order (locks first among ties are already forced in).
+    """
+    must_include = list(must_include or [])
+    if len(must_include) > n_slots:
+        raise ValueError(f"Cannot lock more than {n_slots} players into the lineup")
+    if n_players < n_slots:
+        raise ValueError(f"Need at least {n_slots} players; got {n_players}")
+
+    chosen = set(must_include)
+    ranked = sorted(range(n_players), key=lambda i: values[i], reverse=True)
+    for i in ranked:
+        if len(chosen) >= n_slots:
+            break
+        chosen.add(i)
+    # Stable-ish order: highest value first for readability in debugging
+    return sorted(chosen, key=lambda i: values[i], reverse=True)
+
+
 def recommend_order(features, weights, locks=None):
     """features: (9, 6) array of raw feature values for 9 players.
     weights: dict over ingredients ("trad", "power", "speed", "offense").

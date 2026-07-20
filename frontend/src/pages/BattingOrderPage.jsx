@@ -1,6 +1,7 @@
 import { useRoster } from '../hooks/useRoster'
 import { useBattingOrder } from '../hooks/useBattingOrder'
 import BattingOrderList from '../components/BattingOrderList'
+import { initials } from '../utils/initials'
 
 const INGREDIENT_LABELS = {
   trad: 'Traditional fit',
@@ -9,7 +10,7 @@ const INGREDIENT_LABELS = {
   offense: 'Offense (PA share)',
 }
 
-const ROSTER_SIZE = 9
+const LINEUP_SIZE = 9
 
 function playerName(playersById, id) {
   return playersById.get(id)?.name ?? 'an empty slot'
@@ -37,9 +38,11 @@ export default function BattingOrderPage() {
   } = useBattingOrder()
 
   const busy = rosterLoading || loading
-  const canGenerate = players.length === ROSTER_SIZE && !busy
+  const canGenerate = players.length >= LINEUP_SIZE && !busy
   const playersById = new Map(players.map((p) => [p.id, p]))
   const presetNames = Object.keys(presets)
+  const inLineup = new Set(order)
+  const bench = players.filter((p) => !inLineup.has(p.id))
 
   return (
     <section className="page batting-order-page">
@@ -51,8 +54,8 @@ export default function BattingOrderPage() {
           </p>
         </div>
         <p className="page-hint">
-          Pick a strategy, lock any slots you want to keep, then generate. Drag unlocked rows to
-          override the model&apos;s suggestion.
+          Pick a strategy, lock any slots you want to keep, then generate. The model picks the best
+          nine from your roster and benches the rest. Drag unlocked rows to override the suggestion.
         </p>
       </header>
 
@@ -100,16 +103,16 @@ export default function BattingOrderPage() {
             onClick={generate}
             disabled={!canGenerate}
             title={
-              players.length === ROSTER_SIZE
+              players.length >= LINEUP_SIZE
                 ? undefined
-                : `Need exactly ${ROSTER_SIZE} players (currently ${players.length})`
+                : `Need at least ${LINEUP_SIZE} players (currently ${players.length})`
             }
           >
             Generate order
           </button>
-          {players.length !== ROSTER_SIZE && (
+          {players.length < LINEUP_SIZE && (
             <p className="strategy-guard">
-              Roster must have exactly {ROSTER_SIZE} players before generating
+              Need at least {LINEUP_SIZE} players on the roster to fill a batting order
               (currently {players.length}).
             </p>
           )}
@@ -143,14 +146,39 @@ export default function BattingOrderPage() {
       {busy && order.length === 0 ? (
         <p className="loading-banner">Loading…</p>
       ) : (
-        <BattingOrderList
-          players={players}
-          order={order}
-          locked={locked}
-          scoresByPlayerId={scoresByPlayerId}
-          onReorder={reorder}
-          onToggleLock={toggleLock}
-        />
+        <>
+          <BattingOrderList
+            players={players}
+            order={order}
+            locked={locked}
+            scoresByPlayerId={scoresByPlayerId}
+            onReorder={reorder}
+            onToggleLock={toggleLock}
+          />
+
+          {bench.length > 0 && (
+            <section className="bench-panel" aria-label="Bench">
+              <h3>Bench</h3>
+              <p className="bench-hint">
+                {order.length === LINEUP_SIZE
+                  ? 'Not in the current batting order — regenerate to re-evaluate who starts.'
+                  : 'Players not currently in a batting order.'}
+              </p>
+              <ul className="bench-list">
+                {bench.map((player) => (
+                  <li key={player.id} className="bench-chip">
+                    <span className="chip-avatar">{initials(player.name)}</span>
+                    <span className="chip-name">{player.name}</span>
+                    <span className="stat-chip">
+                      C{player.ratings.contact} P{player.ratings.power} D{player.ratings.discipline}{' '}
+                      S{player.ratings.speed}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
     </section>
   )

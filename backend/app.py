@@ -8,9 +8,10 @@ Response shapes intentionally mirror ``frontend/src/api/mockApi.js`` so the
 frontend hooks work unchanged once they switch from the mock to ``fetch``:
 
 - players are ``{id, name, ratings: {contact, power, discipline, speed}}``
-- batting order state is ``{order, locked, scores, overallScore}`` where
-  ``order`` is player ids by slot, ``scores[i]`` scores ``order[i]``, and
-  ``locked`` entries are ``{slot, playerId}`` with 0-based slots.
+- batting order state is ``{order, locked, scores, overallScore, bench}`` where
+  ``order`` is the starting nine by slot, ``scores[i]`` scores ``order[i]``,
+  ``locked`` entries are ``{slot, playerId}`` with 0-based slots, and ``bench``
+  lists roster players who did not make the lineup.
 
 Roster and batting-order state persist to ``data/app_state.json`` so they
 survive server restarts.
@@ -25,7 +26,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import store
-from model.batting_order import N_SLOTS, PRESETS, recommend_order, score_lineup
+from model.batting_order import (
+    N_SLOTS,
+    PRESETS,
+    recommend_order,
+    score_lineup,
+    select_starters,
+    starter_values,
+)
 from model.ratings import roster_to_features
 
 app = FastAPI(title="Softball Lineup Coach API")
@@ -87,6 +95,8 @@ class BattingOrderState(BaseModel):
     locked: list[LockEntry]
     scores: list[int]
     overallScore: int
+    # Players on the roster who did not make the starting nine.
+    bench: list[str] = []
 
 
 # --------------------------------------------------------------------------
@@ -106,9 +116,10 @@ DEFAULT_ROSTER = [
     ("Taylor Nguyen", dict(contact=5, power=4, discipline=4, speed=5)),
     ("Drew Falk", dict(contact=2, power=5, discipline=5, speed=2)),
     ("Emerson Cole", dict(contact=3, power=2, discipline=2, speed=5)),
+    ("Parker Voss", dict(contact=4, power=3, discipline=4, speed=3)),
 ]
 
-EMPTY_STATE = BattingOrderState(order=[], locked=[], scores=[], overallScore=0)
+EMPTY_STATE = BattingOrderState(order=[], locked=[], scores=[], overallScore=0, bench=[])
 
 players: list[Player] = []
 next_player_number = 1
@@ -145,42 +156,70 @@ def resolve_weights(req: GenerateRequest) -> dict[str, float]:
 
 
 def generate_state(locked: list[LockEntry], weights: dict[str, float]) -> BattingOrderState:
-    if len(players) != N_SLOTS:
+    if len(players) < N_SLOTS:
         raise HTTPException(
             status_code=409,
-            detail=f"Batting order needs exactly {N_SLOTS} players; roster has {len(players)}",
+            detail=f"Batting order needs at least {N_SLOTS} players; roster has {len(players)}",
         )
 
     index_by_id = {p.id: i for i, p in enumerate(players)}
-    locks: dict[int, int] = {}
+    locked_roster_indices: list[int] = []
     seen_slots: set[int] = set()
+    seen_players: set[str] = set()
     for entry in locked:
         if entry.playerId not in index_by_id:
             raise HTTPException(status_code=422, detail=f"Locked player {entry.playerId} not on roster")
         if entry.slot in seen_slots:
             raise HTTPException(status_code=422, detail=f"Slot {entry.slot} locked twice")
-        seen_slots.add(entry.slot)
-        p_idx = index_by_id[entry.playerId]
-        if p_idx in locks:
+        if entry.playerId in seen_players:
             raise HTTPException(status_code=422, detail=f"Player {entry.playerId} locked twice")
-        locks[p_idx] = entry.slot + 1  # model slots are 1-based
+        seen_slots.add(entry.slot)
+        seen_players.add(entry.playerId)
+        locked_roster_indices.append(index_by_id[entry.playerId])
 
-    features = roster_to_features([p.ratings.model_dump() for p in players])
+    if len(locked_roster_indices) > N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot lock more than {N_SLOTS} players into the batting order",
+        )
+
+    # Evaluate the whole roster, keep the best nine (locks always make the cut),
+    # then run the 9-slot assignment only on that starting group.
+    all_features = roster_to_features([p.ratings.model_dump() for p in players])
+    values = starter_values(all_features, weights)
+    starter_idxs = select_starters(
+        len(players), values, n_slots=N_SLOTS, must_include=locked_roster_indices
+    )
+    starters = [players[i] for i in starter_idxs]
+    features = all_features[starter_idxs]
+
+    starter_id_to_row = {p.id: i for i, p in enumerate(starters)}
+    locks = {starter_id_to_row[entry.playerId]: entry.slot + 1 for entry in locked}
+
     slots, matrix = recommend_order(features, weights, locks or None)
     scores, overall = score_lineup(matrix, slots, weights)
 
     order = [""] * N_SLOTS
     for p_idx, slot in enumerate(slots):
-        order[slot - 1] = players[p_idx].id
+        order[slot - 1] = starters[p_idx].id
 
-    return BattingOrderState(order=order, locked=locked, scores=scores, overallScore=overall)
+    starter_ids = set(order)
+    bench = [p.id for p in players if p.id not in starter_ids]
+
+    return BattingOrderState(
+        order=order,
+        locked=locked,
+        scores=scores,
+        overallScore=overall,
+        bench=bench,
+    )
 
 
 def prune_player_references(player_id: str) -> None:
     """Drop locks that point at a removed player and refresh the stored state."""
     global batting_order_state
     remaining = [l for l in batting_order_state.locked if l.playerId != player_id]
-    if len(players) == N_SLOTS:
+    if len(players) >= N_SLOTS:
         batting_order_state = generate_state(remaining, PRESETS[DEFAULT_PRESET])
     else:
         batting_order_state = EMPTY_STATE
@@ -197,7 +236,7 @@ def bootstrap() -> None:
         raw_order = saved.get("batting_order")
         if raw_order:
             batting_order_state = BattingOrderState.model_validate(raw_order)
-        elif len(players) == N_SLOTS:
+        elif len(players) >= N_SLOTS:
             batting_order_state = generate_state([], PRESETS[DEFAULT_PRESET])
         else:
             batting_order_state = EMPTY_STATE

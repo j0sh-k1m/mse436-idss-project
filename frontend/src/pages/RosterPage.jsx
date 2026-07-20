@@ -9,7 +9,8 @@ export default function RosterPage() {
       <header className="page-header">
         <h2>Roster</h2>
         <p className="page-hint">
-          Add and manage the players available for lineups. Ratings are on a 1-5 scale.
+          Add and manage the players available for lineups. Ratings are on a 1-5 scale. Rosters can
+          be larger than nine — the batting-order model picks the best nine and benches the rest.
         </p>
       </header>
 

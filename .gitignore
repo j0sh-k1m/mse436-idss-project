@@ -16,6 +16,7 @@ dist/
 # Data
 backend/data/raw/*
 !backend/data/raw/.gitkeep
+notebooks/batting.csv
 
 # OS
 .DS_Store

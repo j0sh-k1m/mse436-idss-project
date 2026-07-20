@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: phase-5
     content: Add light persistence (SQLite or JSON) so the roster survives restarts.
-    status: pending
+    status: completed
   - id: phase-6
     content: "Add tests: reproduce notebook demo lineup, ratings-mapping sanity check, end-to-end smoke test."
     status: pending

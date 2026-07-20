@@ -12,6 +12,9 @@ frontend hooks work unchanged once they switch from the mock to ``fetch``:
   ``order`` is player ids by slot, ``scores[i]`` scores ``order[i]``, and
   ``locked`` entries are ``{slot, playerId}`` with 0-based slots.
 
+Roster and batting-order state persist to ``data/app_state.json`` so they
+survive server restarts.
+
 Run locally with:
 
     uvicorn app:app --reload --port 8001
@@ -21,6 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+import store
 from model.batting_order import N_SLOTS, PRESETS, recommend_order, score_lineup
 from model.ratings import roster_to_features
 
@@ -86,29 +90,37 @@ class BattingOrderState(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# In-memory store (persistence arrives in a later phase)
+# Store (JSON-backed; seeded on first run)
 # --------------------------------------------------------------------------
 
 _INGREDIENTS = {"trad", "power", "speed", "offense"}
 DEFAULT_PRESET = "Balanced"
 
-players: list[Player] = [
-    Player(id=f"p{i + 1}", name=name, ratings=Ratings(**r))
-    for i, (name, r) in enumerate([
-        ("Jordan Ruiz", dict(contact=4, power=3, discipline=4, speed=5)),
-        ("Sam Ito", dict(contact=3, power=5, discipline=4, speed=3)),
-        ("Casey Boone", dict(contact=5, power=2, discipline=3, speed=4)),
-        ("Riley Marsh", dict(contact=2, power=4, discipline=5, speed=2)),
-        ("Avery Quinn", dict(contact=4, power=4, discipline=3, speed=4)),
-        ("Morgan Diaz", dict(contact=3, power=3, discipline=3, speed=3)),
-        ("Taylor Nguyen", dict(contact=5, power=4, discipline=4, speed=5)),
-        ("Drew Falk", dict(contact=2, power=5, discipline=5, speed=2)),
-        ("Emerson Cole", dict(contact=3, power=2, discipline=2, speed=5)),
-    ])
+DEFAULT_ROSTER = [
+    ("Jordan Ruiz", dict(contact=4, power=3, discipline=4, speed=5)),
+    ("Sam Ito", dict(contact=3, power=5, discipline=4, speed=3)),
+    ("Casey Boone", dict(contact=5, power=2, discipline=3, speed=4)),
+    ("Riley Marsh", dict(contact=2, power=4, discipline=5, speed=2)),
+    ("Avery Quinn", dict(contact=4, power=4, discipline=3, speed=4)),
+    ("Morgan Diaz", dict(contact=3, power=3, discipline=3, speed=3)),
+    ("Taylor Nguyen", dict(contact=5, power=4, discipline=4, speed=5)),
+    ("Drew Falk", dict(contact=2, power=5, discipline=5, speed=2)),
+    ("Emerson Cole", dict(contact=3, power=2, discipline=2, speed=5)),
 ]
-next_player_number = len(players) + 1
 
 EMPTY_STATE = BattingOrderState(order=[], locked=[], scores=[], overallScore=0)
+
+players: list[Player] = []
+next_player_number = 1
+batting_order_state: BattingOrderState = EMPTY_STATE
+
+
+def persist() -> None:
+    store.save({
+        "players": [p.model_dump() for p in players],
+        "next_player_number": next_player_number,
+        "batting_order": batting_order_state.model_dump(),
+    })
 
 
 def find_player(player_id: str) -> Player:
@@ -174,8 +186,33 @@ def prune_player_references(player_id: str) -> None:
         batting_order_state = EMPTY_STATE
 
 
-# Like the mock, serve a freshly generated Balanced lineup on first load.
-batting_order_state: BattingOrderState = generate_state([], PRESETS[DEFAULT_PRESET])
+def bootstrap() -> None:
+    """Load saved state, or seed the demo roster and a Balanced lineup."""
+    global players, next_player_number, batting_order_state
+
+    saved = store.load()
+    if saved and isinstance(saved.get("players"), list):
+        players = [Player.model_validate(p) for p in saved["players"]]
+        next_player_number = int(saved.get("next_player_number", len(players) + 1))
+        raw_order = saved.get("batting_order")
+        if raw_order:
+            batting_order_state = BattingOrderState.model_validate(raw_order)
+        elif len(players) == N_SLOTS:
+            batting_order_state = generate_state([], PRESETS[DEFAULT_PRESET])
+        else:
+            batting_order_state = EMPTY_STATE
+        return
+
+    players = [
+        Player(id=f"p{i + 1}", name=name, ratings=Ratings(**r))
+        for i, (name, r) in enumerate(DEFAULT_ROSTER)
+    ]
+    next_player_number = len(players) + 1
+    batting_order_state = generate_state([], PRESETS[DEFAULT_PRESET])
+    persist()
+
+
+bootstrap()
 
 
 # --------------------------------------------------------------------------
@@ -198,6 +235,7 @@ def add_player(player: PlayerIn) -> Player:
     created = Player(id=f"p{next_player_number}", name=player.name.strip(), ratings=player.ratings)
     next_player_number += 1
     players.append(created)
+    persist()
     return created
 
 
@@ -206,6 +244,7 @@ def update_player(player_id: str, ratings: RatingsUpdate) -> Player:
     player = find_player(player_id)
     updates = {k: v for k, v in ratings.model_dump().items() if v is not None}
     player.ratings = player.ratings.model_copy(update=updates)
+    persist()
     return player
 
 
@@ -215,6 +254,7 @@ def remove_player(player_id: str) -> bool:
     find_player(player_id)
     players = [p for p in players if p.id != player_id]
     prune_player_references(player_id)
+    persist()
     return True
 
 
@@ -228,6 +268,7 @@ def generate_batting_order(req: GenerateRequest) -> BattingOrderState:
     global batting_order_state
     weights = resolve_weights(req)
     batting_order_state = generate_state(req.locked, weights)
+    persist()
     return batting_order_state
 
 

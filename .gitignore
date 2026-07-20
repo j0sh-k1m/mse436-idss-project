@@ -16,6 +16,7 @@ dist/
 # Data
 backend/data/raw/*
 !backend/data/raw/.gitkeep
+backend/data/app_state.json
 notebooks/batting.csv
 
 # OS

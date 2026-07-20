@@ -500,7 +500,7 @@
 
 .batting-row {
   display: grid;
-  grid-template-columns: 32px 32px 1fr auto auto auto auto;
+  grid-template-columns: 32px 32px 1fr auto auto auto;
   align-items: center;
   gap: 10px;
   background: var(--chalk);
@@ -534,6 +534,13 @@
   font-weight: 500;
 }
 
+.stat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
 .stat-chip {
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -564,7 +571,7 @@
   }
 
   .batting-row {
-    grid-template-columns: 26px 26px 1fr auto auto auto auto;
+    grid-template-columns: 26px 26px 1fr auto auto auto;
     padding: 8px;
     font-size: 0.85rem;
   }

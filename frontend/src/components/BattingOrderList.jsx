@@ -47,8 +47,12 @@ export default function BattingOrderList({
             <span className="batting-slot-number">{index + 1}</span>
             <span className="chip-avatar">{initials(player.name)}</span>
             <span className="batting-name">{player.name}</span>
-            <span className="stat-chip">C {player.ratings.contact}</span>
-            <span className="stat-chip">P {player.ratings.power}</span>
+            <span className="stat-chips">
+              <span className="stat-chip">C {player.ratings.contact}</span>
+              <span className="stat-chip">P {player.ratings.power}</span>
+              <span className="stat-chip">D {player.ratings.discipline}</span>
+              <span className="stat-chip">S {player.ratings.speed}</span>
+            </span>
             {typeof score === 'number' && (
               <span className={`score-badge ${scoreTier(score)}`}>{score}</span>
             )}

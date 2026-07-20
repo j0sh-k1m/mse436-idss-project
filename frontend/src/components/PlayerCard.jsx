@@ -1,9 +1,9 @@
 import { initials } from '../utils/initials'
 
 const RATING_FIELDS = [
-  { key: 'hitting', label: 'HIT' },
-  { key: 'fielding', label: 'FLD' },
-  { key: 'throwing', label: 'THR' },
+  { key: 'contact', label: 'CON' },
+  { key: 'power', label: 'PWR' },
+  { key: 'discipline', label: 'DSC' },
   { key: 'speed', label: 'SPD' },
 ]
 

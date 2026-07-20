@@ -14,7 +14,7 @@ frontend hooks work unchanged once they switch from the mock to ``fetch``:
 
 Run locally with:
 
-    uvicorn app:app --reload --port 8000
+    uvicorn app:app --reload --port 8001
 """
 
 from fastapi import FastAPI, HTTPException

@@ -40,7 +40,7 @@ Ratings are integers 1–5.
 
 ## Batting order
 
-Response shape:
+Response shape (GET / working state):
 
 ```json
 {
@@ -57,35 +57,75 @@ Response shape:
 - `locked` — 0-based `{ slot, playerId }` pairs the coach pinned.
 - `bench` — roster players who did not make the starting nine.
 
+`POST /batting-order` returns the same fields plus `alternatives`: always the fixed compare presets **Balanced**, **Small-ball**, and **Max offense**. When `customWeights` is sent, a **Custom** alternative is included as well. Duplicate preset orders are dropped; Custom is kept even if it matches a preset.
+
+```json
+{
+  "order": ["p7", "p1", "..."],
+  "locked": [],
+  "scores": [72, 65, 58, 60, 55, 48, 44, 40, 38],
+  "overallScore": 53,
+  "bench": ["p8"],
+  "alternatives": [
+    {
+      "id": "alt-0",
+      "label": "Balanced",
+      "preset": "Balanced",
+      "weights": { "trad": 1.0, "power": 0.0, "speed": 0.0, "offense": 0.3 },
+      "order": ["p7", "p1", "..."],
+      "scores": [72, 65, 58, 60, 55, 48, 44, 40, 38],
+      "overallScore": 53,
+      "bench": ["p8"],
+      "locked": []
+    }
+  ]
+}
+```
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/batting-order` | Last generated (or seeded) lineup state |
-| `POST` | `/batting-order` | Generate a new order |
+| `POST` | `/batting-order` | Generate compare options (+ optional Custom) |
+| `POST` | `/batting-order/select` | Commit one alternative as the working order |
 
 ### `POST /batting-order` body
 
 ```json
 {
-  "locked": [{ "slot": 0, "playerId": "p3" }],
-  "preset": "Aggressive"
+  "locked": [{ "slot": 0, "playerId": "p3" }]
 }
 ```
 
-Or custom weights instead of a preset:
+Optional custom strategy:
 
 ```json
 {
   "locked": [],
-  "weights": { "trad": 0.4, "power": 0.0, "speed": 1.0, "offense": 0.3 }
+  "customWeights": { "trad": 0.4, "power": 0.0, "speed": 1.0, "offense": 0.3 }
 }
 ```
 
-- If neither `weights` nor `preset` is sent, the server uses **Balanced**.
+- Without `customWeights`, returns the three fixed presets; working state is set to **Balanced**.
+- With `customWeights`, also returns **Custom** and sets the working state to that lineup.
 - Requires **at least nine** players on the roster (409 otherwise).
-- Unknown presets / ingredients or conflicting locks → 422.
+- Unknown ingredients or conflicting locks → 422.
+
+### `POST /batting-order/select` body
+
+```json
+{
+  "order": ["p7", "p1", "..."],
+  "scores": [72, 65, 58, 60, 55, 48, 44, 40, 38],
+  "overallScore": 53,
+  "bench": ["p8"],
+  "locked": []
+}
+```
+
+Validates that the nine players (and any locks) exist on the roster, then persists that lineup as the working state.
 
 ## Presets
 
 ### `GET /presets`
 
-Returns the weight vectors stored in `slot_scoring.json`, e.g. Balanced, Aggressive, Small-ball, Max offense.
+Returns the weight vectors stored in `slot_scoring.json` (including Aggressive, which is not used in the compare UI).

@@ -5,8 +5,9 @@ The batting-order recommender is an interpretable assignment model, not a black-
 ## What the coach controls
 
 1. **Roster ratings** — each player gets four 1–5 traits: contact, power, discipline, speed.
-2. **Strategy weights** — four ingredients (traditional fit, power, speed, offense / PA share), via presets or sliders.
-3. **Locks** — pin a player into a batting slot; the rest of the order re-optimizes around that choice.
+2. **Compare options** — generate returns three fixed strategies (Balanced, Small-ball, Max offense) side by side.
+3. **Customize** — optional fourth lineup from coach-chosen ingredient weights, compared against the same three.
+4. **Locks** — pin a player into a batting slot; regenerate re-optimizes the rest around that choice.
 
 ## Trait → feature mapping
 
@@ -32,7 +33,7 @@ For a set of nine starters, the model builds four 9×9 matrices (players × slot
 
 User weights blend those matrices. The Hungarian algorithm (`scipy.optimize.linear_sum_assignment`) finds the assignment that maximizes total score. Locks are enforced by making the locked pairing irresistible to the solver.
 
-Presets (Balanced, Aggressive, Small-ball, Max offense) are just saved weight vectors.
+Presets (Balanced, Small-ball, Max offense) are the fixed compare options in the UI. Aggressive remains in `slot_scoring.json` but is not offered in the compare flow. Custom weights from the coach are an optional fourth candidate.
 
 ## Rosters larger than nine
 

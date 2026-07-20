@@ -1,14 +1,8 @@
 import { useRoster } from '../hooks/useRoster'
 import { useBattingOrder } from '../hooks/useBattingOrder'
 import BattingOrderList from '../components/BattingOrderList'
-import { initials } from '../utils/initials'
-
-const INGREDIENT_LABELS = {
-  trad: 'Traditional fit',
-  power: 'Power',
-  speed: 'Speed',
-  offense: 'Offense (PA share)',
-}
+import LineupAlternatives from '../components/LineupAlternatives'
+import RosterStatusPanel from '../components/RosterStatusPanel'
 
 const LINEUP_SIZE = 9
 
@@ -24,14 +18,15 @@ export default function BattingOrderPage() {
     scoresByPlayerId,
     overallScore,
     changes,
+    alternatives,
+    selectedAlternativeId,
     loading,
     error,
-    presets,
-    activePreset,
-    weights,
-    selectPreset,
-    setWeight,
+    customWeights,
+    setCustomWeight,
     generate,
+    generateWithCustom,
+    selectAlternative,
     reorder,
     toggleLock,
     dismissChanges,
@@ -40,142 +35,119 @@ export default function BattingOrderPage() {
   const busy = rosterLoading || loading
   const canGenerate = players.length >= LINEUP_SIZE && !busy
   const playersById = new Map(players.map((p) => [p.id, p]))
-  const presetNames = Object.keys(presets)
-  const inLineup = new Set(order)
-  const bench = players.filter((p) => !inLineup.has(p.id))
+  const hasOptions = alternatives.length > 0
 
   return (
     <section className="page batting-order-page">
       <header className="page-header">
         <div className="page-header-top">
-          <h2>Batting Order</h2>
-          <p className="score-headline">
-            Lineup batting score: <span className="score-headline-value">{overallScore}</span>/100
-          </p>
-        </div>
-        <p className="page-hint">
-          Pick a strategy, lock any slots you want to keep, then generate. The model picks the best
-          nine from your roster and benches the rest. Drag unlocked rows to override the suggestion.
-        </p>
-      </header>
-
-      <section className="strategy-panel" aria-label="Lineup strategy">
-        <h3>Strategy</h3>
-        <div className="preset-row" role="group" aria-label="Strategy presets">
-          {presetNames.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className={`preset-btn${activePreset === name ? ' active' : ''}`}
-              aria-pressed={activePreset === name}
-              onClick={() => selectPreset(name)}
-              disabled={busy}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-
-        <div className="weight-sliders">
-          {Object.keys(INGREDIENT_LABELS).map((key) => (
-            <label className="weight-slider" key={key}>
-              <span className="weight-label">
-                {INGREDIENT_LABELS[key]}
-                <span className="weight-value">{Number(weights[key] ?? 0).toFixed(1)}</span>
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={weights[key] ?? 0}
-                onChange={(e) => setWeight(key, Number(e.target.value))}
-                disabled={busy}
-              />
-            </label>
-          ))}
-        </div>
-
-        <div className="strategy-actions">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={generate}
-            disabled={!canGenerate}
-            title={
-              players.length >= LINEUP_SIZE
-                ? undefined
-                : `Need at least ${LINEUP_SIZE} players (currently ${players.length})`
-            }
-          >
-            Generate order
-          </button>
-          {players.length < LINEUP_SIZE && (
-            <p className="strategy-guard">
-              Need at least {LINEUP_SIZE} players on the roster to fill a batting order
-              (currently {players.length}).
+          <div className="page-header-copy">
+            <h2>Batting Order</h2>
+            <p className="page-hint">
+              Generate three strategy options, pick one, then lock slots or drag to override. Use
+              Customize to try your own weight mix against the same three.
             </p>
-          )}
+          </div>
+          <div className="page-header-actions">
+            {order.length > 0 && (
+              <p className="score-headline">
+                Score <span className="score-headline-value">{overallScore}</span>/100
+              </p>
+            )}
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={generate}
+              disabled={!canGenerate}
+              title={
+                players.length >= LINEUP_SIZE
+                  ? undefined
+                  : `Need at least ${LINEUP_SIZE} players (currently ${players.length})`
+              }
+            >
+              {hasOptions ? 'Regenerate options' : 'Generate options'}
+            </button>
+          </div>
         </div>
-      </section>
+        {players.length < LINEUP_SIZE && (
+          <p className="strategy-guard">
+            Need at least {LINEUP_SIZE} players on the roster (currently {players.length}). Add
+            players on the Roster tab.
+          </p>
+        )}
+      </header>
 
       {(error || rosterError) && <p className="error-banner">{error || rosterError}</p>}
 
-      {changes.length > 0 && (
-        <p className="changes-banner">
-          Changed:{' '}
-          {changes
-            .map(
-              (c) =>
-                `#${c.slot + 1} (${playerName(playersById, c.from)} → ${playerName(playersById, c.to)})`,
-            )
-            .join(', ')}
-          {locked.length > 0 &&
-            `, ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
-          <button
-            type="button"
-            className="dismiss-btn"
-            onClick={dismissChanges}
-            aria-label="Dismiss changes summary"
-          >
-            ×
-          </button>
+      {!hasOptions && !busy && players.length >= LINEUP_SIZE && (
+        <p className="empty-options-banner">
+          Hit <strong>Generate options</strong> to compare Balanced, Small-ball, and Max offense
+          lineups.
         </p>
       )}
 
-      {busy && order.length === 0 ? (
+      {busy && !hasOptions && order.length === 0 ? (
         <p className="loading-banner">Loading…</p>
       ) : (
         <>
-          <BattingOrderList
-            players={players}
-            order={order}
-            locked={locked}
-            scoresByPlayerId={scoresByPlayerId}
-            onReorder={reorder}
-            onToggleLock={toggleLock}
+          <LineupAlternatives
+            alternatives={alternatives}
+            selectedId={selectedAlternativeId}
+            playersById={playersById}
+            onSelect={selectAlternative}
+            disabled={busy}
+            customWeights={customWeights}
+            onCustomWeightChange={setCustomWeight}
+            onCompareCustom={generateWithCustom}
+            canCompareCustom={canGenerate}
           />
 
-          {bench.length > 0 && (
-            <section className="bench-panel" aria-label="Bench">
-              <h3>Bench</h3>
-              <p className="bench-hint">
-                {order.length === LINEUP_SIZE
-                  ? 'Not in the current batting order — regenerate to re-evaluate who starts.'
-                  : 'Players not currently in a batting order.'}
-              </p>
-              <ul className="bench-list">
-                {bench.map((player) => (
-                  <li key={player.id} className="bench-chip">
-                    <span className="chip-avatar">{initials(player.name)}</span>
-                    <span className="chip-name">{player.name}</span>
-                    <span className="stat-chip">
-                      C{player.ratings.contact} P{player.ratings.power} D{player.ratings.discipline}{' '}
-                      S{player.ratings.speed}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+          {(order.length > 0 || hasOptions) && (
+            <section className="refine-section" aria-label="Refine selected lineup">
+              <div className="refine-header">
+                <h3>Refine selected lineup</h3>
+                <p className="refine-hint">
+                  Lock batters you want to keep, drag unlocked rows to override, then regenerate to
+                  re-optimize around those locks.
+                </p>
+              </div>
+
+              {changes.length > 0 && (
+                <p className="changes-banner">
+                  Changed:{' '}
+                  {changes
+                    .map(
+                      (c) =>
+                        `#${c.slot + 1} (${playerName(playersById, c.from)} → ${playerName(playersById, c.to)})`,
+                    )
+                    .join(', ')}
+                  {locked.length > 0 &&
+                    `, ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
+                  <button
+                    type="button"
+                    className="dismiss-btn"
+                    onClick={dismissChanges}
+                    aria-label="Dismiss changes summary"
+                  >
+                    ×
+                  </button>
+                </p>
+              )}
+
+              <div className="refine-layout">
+                <div className="refine-lineup">
+                  <h4 className="refine-col-label">Lineup &amp; locks</h4>
+                  <BattingOrderList
+                    players={players}
+                    order={order}
+                    locked={locked}
+                    scoresByPlayerId={scoresByPlayerId}
+                    onReorder={reorder}
+                    onToggleLock={toggleLock}
+                  />
+                </div>
+                <RosterStatusPanel players={players} order={order} locked={locked} />
+              </div>
             </section>
           )}
         </>

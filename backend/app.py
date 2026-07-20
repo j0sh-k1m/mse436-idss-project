@@ -12,6 +12,8 @@ frontend hooks work unchanged once they switch from the mock to ``fetch``:
   ``order`` is the starting nine by slot, ``scores[i]`` scores ``order[i]``,
   ``locked`` entries are ``{slot, playerId}`` with 0-based slots, and ``bench``
   lists roster players who did not make the lineup.
+- ``POST /batting-order`` also returns ``alternatives``: the fixed compare
+  presets (Balanced, Small-ball, Max offense) plus an optional Custom lineup.
 
 Roster and batting-order state persist to ``data/app_state.json`` so they
 survive server restarts.
@@ -84,10 +86,9 @@ class LockEntry(BaseModel):
 
 class GenerateRequest(BaseModel):
     locked: list[LockEntry] = []
-    # Slider weights over the model ingredients; defaults to the Balanced
-    # preset when neither weights nor preset is given.
-    weights: dict[str, float] | None = None
-    preset: str | None = None
+    # Optional custom ingredient weights; when set, a "Custom" alternative is
+    # included alongside the fixed compare presets.
+    customWeights: dict[str, float] | None = None
 
 
 class BattingOrderState(BaseModel):
@@ -99,12 +100,44 @@ class BattingOrderState(BaseModel):
     bench: list[str] = []
 
 
+class LineupAlternative(BaseModel):
+    """One candidate lineup for the coach to compare and choose among."""
+
+    id: str
+    label: str
+    preset: str | None = None
+    weights: dict[str, float]
+    order: list[str]
+    scores: list[int]
+    overallScore: int
+    bench: list[str] = []
+    locked: list[LockEntry] = []
+
+
+class GenerateResponse(BattingOrderState):
+    """Primary lineup plus alternative strategies for side-by-side comparison."""
+
+    alternatives: list[LineupAlternative] = []
+
+
+class SelectRequest(BaseModel):
+    """Commit one of the generated alternatives as the working batting order."""
+
+    order: list[str]
+    scores: list[int]
+    overallScore: int
+    bench: list[str] = []
+    locked: list[LockEntry] = []
+
+
 # --------------------------------------------------------------------------
 # Store (JSON-backed; seeded on first run)
 # --------------------------------------------------------------------------
 
 _INGREDIENTS = {"trad", "power", "speed", "offense"}
 DEFAULT_PRESET = "Balanced"
+# Fixed strategies shown for comparison (Aggressive is intentionally omitted).
+COMPARE_PRESETS = ("Balanced", "Small-ball", "Max offense")
 
 DEFAULT_ROSTER = [
     ("Jordan Ruiz", dict(contact=4, power=3, discipline=4, speed=5)),
@@ -141,18 +174,55 @@ def find_player(player_id: str) -> Player:
     raise HTTPException(status_code=404, detail=f"Player {player_id} not found")
 
 
-def resolve_weights(req: GenerateRequest) -> dict[str, float]:
-    if req.weights is not None:
-        unknown = set(req.weights) - _INGREDIENTS
-        if unknown:
-            raise HTTPException(status_code=422, detail=f"Unknown ingredients: {sorted(unknown)}")
-        if all(w == 0 for w in req.weights.values()):
-            raise HTTPException(status_code=422, detail="At least one weight must be non-zero")
-        return req.weights
-    preset = req.preset or DEFAULT_PRESET
-    if preset not in PRESETS:
-        raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
-    return PRESETS[preset]
+def resolve_custom_weights(weights: dict[str, float]) -> dict[str, float]:
+    unknown = set(weights) - _INGREDIENTS
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown ingredients: {sorted(unknown)}")
+    if all(w == 0 for w in weights.values()):
+        raise HTTPException(status_code=422, detail="At least one weight must be non-zero")
+    return weights
+
+
+def build_alternatives(
+    locked: list[LockEntry],
+    custom_weights: dict[str, float] | None = None,
+) -> list[LineupAlternative]:
+    """Build the fixed compare presets, plus an optional Custom lineup.
+
+    Duplicate orders (same nine in the same slots) are dropped so the coach
+    only compares meaningfully different options.
+    """
+    strategies: list[tuple[str, str | None, dict[str, float]]] = []
+    for name in COMPARE_PRESETS:
+        if name not in PRESETS:
+            raise HTTPException(status_code=500, detail=f"Missing compare preset: {name}")
+        strategies.append((name, name, PRESETS[name]))
+
+    if custom_weights is not None:
+        strategies.append(("Custom", None, custom_weights))
+
+    alternatives: list[LineupAlternative] = []
+    seen_orders: set[tuple[str, ...]] = set()
+    for i, (label, preset, weights) in enumerate(strategies):
+        state = generate_state(locked, weights)
+        key = tuple(state.order)
+        if key in seen_orders and label != "Custom":
+            continue
+        seen_orders.add(key)
+        alternatives.append(
+            LineupAlternative(
+                id=f"alt-{i}",
+                label=label,
+                preset=preset,
+                weights=weights,
+                order=state.order,
+                scores=state.scores,
+                overallScore=state.overallScore,
+                bench=state.bench,
+                locked=list(state.locked),
+            )
+        )
+    return alternatives
 
 
 def generate_state(locked: list[LockEntry], weights: dict[str, float]) -> BattingOrderState:
@@ -303,10 +373,76 @@ def get_batting_order() -> BattingOrderState:
 
 
 @app.post("/batting-order")
-def generate_batting_order(req: GenerateRequest) -> BattingOrderState:
+def generate_batting_order(req: GenerateRequest) -> GenerateResponse:
+    """Generate the fixed compare presets (and optional Custom) for the coach.
+
+    Persists the Balanced lineup as the working order; the coach can select a
+    different alternative via ``POST /batting-order/select``.
+    """
     global batting_order_state
-    weights = resolve_weights(req)
-    batting_order_state = generate_state(req.locked, weights)
+    custom = resolve_custom_weights(req.customWeights) if req.customWeights is not None else None
+    alternatives = build_alternatives(req.locked, custom)
+    if not alternatives:
+        raise HTTPException(status_code=500, detail="No lineup alternatives produced")
+
+    primary = next((a for a in alternatives if a.label == "Custom"), None)
+    if primary is None:
+        primary = next((a for a in alternatives if a.preset == DEFAULT_PRESET), alternatives[0])
+    batting_order_state = BattingOrderState(
+        order=primary.order,
+        locked=list(primary.locked),
+        scores=primary.scores,
+        overallScore=primary.overallScore,
+        bench=primary.bench,
+    )
+    persist()
+    return GenerateResponse(**batting_order_state.model_dump(), alternatives=alternatives)
+
+
+@app.post("/batting-order/select")
+def select_batting_order(req: SelectRequest) -> BattingOrderState:
+    """Commit a compared alternative as the working batting order."""
+    global batting_order_state
+
+    if len(req.order) != N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Order must have exactly {N_SLOTS} players; got {len(req.order)}",
+        )
+    if len(req.scores) != N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Scores must have exactly {N_SLOTS} values; got {len(req.scores)}",
+        )
+    if len(set(req.order)) != N_SLOTS:
+        raise HTTPException(status_code=422, detail="Order contains duplicate players")
+
+    roster_ids = {p.id for p in players}
+    unknown = [pid for pid in req.order if pid not in roster_ids]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown players in order: {unknown}")
+    unknown_bench = [pid for pid in req.bench if pid not in roster_ids]
+    if unknown_bench:
+        raise HTTPException(status_code=422, detail=f"Unknown players on bench: {unknown_bench}")
+
+    for entry in req.locked:
+        if entry.playerId not in roster_ids:
+            raise HTTPException(
+                status_code=422, detail=f"Locked player {entry.playerId} not on roster"
+            )
+        if entry.playerId not in req.order or req.order[entry.slot] != entry.playerId:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Lock for {entry.playerId} does not match order slot {entry.slot}",
+            )
+
+    batting_order_state = BattingOrderState(
+        order=req.order,
+        locked=req.locked,
+        scores=req.scores,
+        overallScore=req.overallScore,
+        bench=req.bench,
+    )
     persist()
     return batting_order_state
 

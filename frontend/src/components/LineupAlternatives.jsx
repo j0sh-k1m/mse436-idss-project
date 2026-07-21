@@ -1,11 +1,23 @@
 import { useState } from 'react'
 import { initials } from '../utils/initials'
+import {
+  explanationSummary,
+  playerMoves,
+} from '../utils/decisionViz'
 
 const INGREDIENT_LABELS = {
   trad: 'Traditional fit',
   power: 'Power',
   speed: 'Speed',
   offense: 'Offense (PA share)',
+}
+
+function strategyPriority(weights = {}) {
+  const entries = Object.entries(weights).filter(([, w]) => w > 0)
+  if (!entries.length) return null
+  entries.sort((a, b) => b[1] - a[1])
+  const [key] = entries[0]
+  return INGREDIENT_LABELS[key]?.replace(' (PA share)', '') ?? key
 }
 
 function slotDiffCount(baselineOrder, order) {
@@ -19,6 +31,8 @@ function slotDiffCount(baselineOrder, order) {
 
 function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, disabled }) {
   const diffs = alt.id === baseline?.id || !baseline ? 0 : slotDiffCount(baseline.order, alt.order)
+  const moves = baseline && alt.id !== baseline.id ? playerMoves(baseline.order, alt.order) : new Map()
+  const priority = strategyPriority(alt.weights)
 
   return (
     <article
@@ -28,13 +42,15 @@ function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, dis
     >
       <header className="alternative-card-header">
         <h4 className="alternative-label">{alt.label}</h4>
-        <p className="alternative-score">
-          <span className="alternative-score-value">{alt.overallScore}</span>
-          <span className="alternative-score-unit">/100</span>
-        </p>
       </header>
 
-      {diffs > 0 && (
+      {priority && (
+        <p className="alternative-priority">
+          Prioritizes <strong>{priority}</strong>
+          {diffs > 0 ? ` · ${diffs} slot${diffs === 1 ? '' : 's'} differ from ${baselineLabel}` : null}
+        </p>
+      )}
+      {!priority && diffs > 0 && (
         <p className="alternative-diff">
           {diffs} slot{diffs === 1 ? '' : 's'} differ from {baselineLabel}
         </p>
@@ -44,15 +60,28 @@ function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, dis
         {alt.order.map((playerId, index) => {
           const player = alt._playersById?.get(playerId)
           const changed = baseline?.order?.length > 0 && playerId !== baseline.order[index]
+          const move = moves.get(playerId)
+          const explanation = alt.explanations?.[index]
+          const why = explanationSummary(explanation)
           return (
             <li
               key={`${alt.id}-${index}`}
               className={`alternative-slot${changed ? ' changed' : ''}`}
+              title={why || undefined}
             >
               <span className="alternative-slot-num">{index + 1}</span>
               <span className="alternative-slot-avatar">{initials(player?.name ?? '?')}</span>
-              <span className="alternative-slot-name">{player?.name ?? playerId}</span>
-              <span className="alternative-slot-score">{alt.scores[index]}</span>
+              <span className="alternative-slot-body">
+                <span className="alternative-slot-name">{player?.name ?? playerId}</span>
+                {(move || explanation?.topLabel) && (
+                  <span className="alternative-slot-meta">
+                    {move && <span className={`move-badge move-${move.kind}`}>{move.label}</span>}
+                    {explanation?.topLabel && (
+                      <span className="driver-badge-sm">{explanation.topLabel}</span>
+                    )}
+                  </span>
+                )}
+              </span>
             </li>
           )
         })}
@@ -70,6 +99,11 @@ function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, dis
         className={selected ? 'btn-secondary' : 'btn-primary'}
         onClick={() => onSelect(alt)}
         disabled={disabled || selected}
+        title={
+          diffs > 0
+            ? `Choosing ${alt.label} changes ${diffs} batting slot${diffs === 1 ? '' : 's'} vs ${baselineLabel}`
+            : undefined
+        }
       >
         {selected ? 'Selected' : 'Use this lineup'}
       </button>
@@ -100,8 +134,8 @@ export default function LineupAlternatives({
       <div className="alternatives-header">
         <h3>Compare options</h3>
         <p className="alternatives-hint">
-          Three strategy lineups side by side. Open Customize to add your own mix and compare it
-          against these.
+          Each strategy prioritizes different traits — hover a batter to see which ingredient drove
+          their slot. Move badges show how a choice would change the order vs {baseline.label}.
         </p>
       </div>
 

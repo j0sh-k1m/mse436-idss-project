@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '../api/mockApi'
+import { playerMoves, slotLabel } from '../utils/decisionViz'
 
 const DEFAULT_WEIGHTS = { trad: 1.0, power: 0.0, speed: 0.0, offense: 0.3 }
 
@@ -22,6 +23,15 @@ function scoresMapFromResult(result) {
   return map
 }
 
+function explanationsMapFromResult(result) {
+  const map = {}
+  const explanations = result.explanations ?? []
+  result.order.forEach((playerId, i) => {
+    if (explanations[i]) map[playerId] = explanations[i]
+  })
+  return map
+}
+
 function pickSelectedId(alts, preferCustom) {
   if (preferCustom) {
     const custom = alts.find((a) => a.label === 'Custom')
@@ -34,8 +44,10 @@ export function useBattingOrder() {
   const [order, setOrder] = useState([])
   const [locked, setLocked] = useState([])
   const [scoresByPlayerId, setScoresByPlayerId] = useState({})
+  const [explanationsByPlayerId, setExplanationsByPlayerId] = useState({})
   const [overallScore, setOverallScore] = useState(0)
   const [changes, setChanges] = useState([])
+  const [previousOrder, setPreviousOrder] = useState([])
   const [alternatives, setAlternatives] = useState([])
   const [selectedAlternativeId, setSelectedAlternativeId] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -47,6 +59,7 @@ export function useBattingOrder() {
     setLocked(result.locked)
     setOverallScore(result.overallScore)
     setScoresByPlayerId(scoresMapFromResult(result))
+    setExplanationsByPlayerId(explanationsMapFromResult(result))
   }, [])
 
   const refresh = useCallback(() => {
@@ -88,6 +101,7 @@ export function useBattingOrder() {
       return api
         .generateBattingOrder(locked, options)
         .then((result) => {
+          setPreviousOrder(previous)
           applyResult(result)
           setChanges(diffOrder(previous, result.order))
           const alts = result.alternatives ?? []
@@ -112,6 +126,7 @@ export function useBattingOrder() {
       return api
         .selectBattingOrder(alternative)
         .then((result) => {
+          setPreviousOrder(previous)
           applyResult(result)
           setChanges(diffOrder(previous, result.order))
           setSelectedAlternativeId(alternative.id)
@@ -164,14 +179,31 @@ export function useBattingOrder() {
     [order],
   )
 
-  const dismissChanges = useCallback(() => setChanges([]), [])
+  const dismissChanges = useCallback(() => {
+    setChanges([])
+    setPreviousOrder([])
+  }, [])
+
+  const movesByPlayerId = useMemo(
+    () => (changes.length > 0 ? playerMoves(previousOrder, order) : new Map()),
+    [changes, previousOrder, order],
+  )
+
+  const changeSummary = useMemo(() => {
+    if (!changes.length) return []
+    const moves = playerMoves(previousOrder, order)
+    return [...moves.values()].map((m) => m.label)
+  }, [changes, previousOrder, order])
 
   return {
     order,
     locked,
     scoresByPlayerId,
+    explanationsByPlayerId,
     overallScore,
     changes,
+    changeSummary,
+    movesByPlayerId,
     alternatives,
     selectedAlternativeId,
     loading,
@@ -185,5 +217,6 @@ export function useBattingOrder() {
     reorder,
     toggleLock,
     dismissChanges,
+    slotLabel,
   }
 }

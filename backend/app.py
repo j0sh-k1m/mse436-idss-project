@@ -8,10 +8,11 @@ Response shapes intentionally mirror ``frontend/src/api/mockApi.js`` so the
 frontend hooks work unchanged once they switch from the mock to ``fetch``:
 
 - players are ``{id, name, ratings: {contact, power, discipline, speed}}``
-- batting order state is ``{order, locked, scores, overallScore, bench}`` where
-  ``order`` is the starting nine by slot, ``scores[i]`` scores ``order[i]``,
-  ``locked`` entries are ``{slot, playerId}`` with 0-based slots, and ``bench``
-  lists roster players who did not make the lineup.
+- batting order state is ``{order, locked, scores, overallScore, bench,
+  explanations}`` where ``order`` is the starting nine by slot,
+  ``scores[i]`` / ``explanations[i]`` describe ``order[i]``, ``locked`` entries
+  are ``{slot, playerId}`` with 0-based slots, and ``bench`` lists roster
+  players who did not make the lineup.
 - ``POST /batting-order`` also returns ``alternatives``: the fixed compare
   presets (Balanced, Small-ball, Max offense) plus an optional Custom lineup.
 
@@ -31,6 +32,7 @@ import store
 from model.batting_order import (
     N_SLOTS,
     PRESETS,
+    explain_assignment,
     recommend_order,
     score_lineup,
     select_starters,
@@ -91,6 +93,14 @@ class GenerateRequest(BaseModel):
     customWeights: dict[str, float] | None = None
 
 
+class SlotExplanation(BaseModel):
+    """Why the model put a player in this batting slot."""
+
+    topIngredient: str
+    topLabel: str
+    contributions: dict[str, int] = {}
+
+
 class BattingOrderState(BaseModel):
     order: list[str]
     locked: list[LockEntry]
@@ -98,6 +108,8 @@ class BattingOrderState(BaseModel):
     overallScore: int
     # Players on the roster who did not make the starting nine.
     bench: list[str] = []
+    # Parallel to ``order`` / ``scores``: ingredient driver for each slot.
+    explanations: list[SlotExplanation] = []
 
 
 class LineupAlternative(BaseModel):
@@ -112,6 +124,7 @@ class LineupAlternative(BaseModel):
     overallScore: int
     bench: list[str] = []
     locked: list[LockEntry] = []
+    explanations: list[SlotExplanation] = []
 
 
 class GenerateResponse(BattingOrderState):
@@ -128,6 +141,7 @@ class SelectRequest(BaseModel):
     overallScore: int
     bench: list[str] = []
     locked: list[LockEntry] = []
+    explanations: list[SlotExplanation] = []
 
 
 # --------------------------------------------------------------------------
@@ -220,6 +234,7 @@ def build_alternatives(
                 overallScore=state.overallScore,
                 bench=state.bench,
                 locked=list(state.locked),
+                explanations=list(state.explanations),
             )
         )
     return alternatives
@@ -268,6 +283,10 @@ def generate_state(locked: list[LockEntry], weights: dict[str, float]) -> Battin
 
     slots, matrix = recommend_order(features, weights, locks or None)
     scores, overall = score_lineup(matrix, slots, weights)
+    explanations = [
+        SlotExplanation.model_validate(e)
+        for e in explain_assignment(features, weights, slots)
+    ]
 
     order = [""] * N_SLOTS
     for p_idx, slot in enumerate(slots):
@@ -282,6 +301,7 @@ def generate_state(locked: list[LockEntry], weights: dict[str, float]) -> Battin
         scores=scores,
         overallScore=overall,
         bench=bench,
+        explanations=explanations,
     )
 
 
@@ -394,6 +414,7 @@ def generate_batting_order(req: GenerateRequest) -> GenerateResponse:
         scores=primary.scores,
         overallScore=primary.overallScore,
         bench=primary.bench,
+        explanations=list(primary.explanations),
     )
     persist()
     return GenerateResponse(**batting_order_state.model_dump(), alternatives=alternatives)
@@ -442,6 +463,7 @@ def select_batting_order(req: SelectRequest) -> BattingOrderState:
         scores=req.scores,
         overallScore=req.overallScore,
         bench=req.bench,
+        explanations=req.explanations,
     )
     persist()
     return batting_order_state

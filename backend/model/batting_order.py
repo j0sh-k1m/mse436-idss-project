@@ -156,3 +156,70 @@ def score_lineup(matrix, slots, weights):
         scores[slot - 1] = int(round(100 * min(max(raw, 0.0), 1.0)))
     overall = int(round(sum(scores) / len(scores)))
     return scores, overall
+
+
+INGREDIENT_LABELS = {
+    "trad": "Traditional fit",
+    "power": "Power",
+    "speed": "Speed",
+    "offense": "Offense",
+}
+
+
+def explain_assignment(features, weights, slots):
+    """Per-slot ingredient breakdown for the assigned lineup.
+
+    For each batting slot, returns which weighted ingredient contributed most to
+    placing that player there — so the UI can show *why* the model made the
+    choice, not just the blended score.
+
+    Returns a list ordered by batting slot 1-9; each entry is
+    ``{topIngredient, topLabel, contributions}`` where ``contributions`` maps
+    ingredient → percent share of the weighted score for that (player, slot).
+    """
+    mats = ingredient_matrices(features)
+    explanations: list[dict] = []
+    for slot_num in range(1, len(slots) + 1):
+        # Find which player row was assigned to this slot
+        matches = [p_idx for p_idx, s in enumerate(slots) if int(s) == slot_num]
+        if not matches:
+            explanations.append(
+                {
+                    "topIngredient": "trad",
+                    "topLabel": INGREDIENT_LABELS["trad"],
+                    "contributions": {},
+                }
+            )
+            continue
+        p_idx = matches[0]
+        col = slot_num - 1
+        contribs = {
+            k: float(w * mats[k][p_idx, col])
+            for k, w in weights.items()
+            if w > 0
+        }
+        if not contribs:
+            explanations.append(
+                {
+                    "topIngredient": "trad",
+                    "topLabel": INGREDIENT_LABELS["trad"],
+                    "contributions": {},
+                }
+            )
+            continue
+        total = sum(contribs.values()) or 1.0
+        pct = {k: int(round(100 * v / total)) for k, v in contribs.items()}
+        # Fix rounding drift so shares sum to ~100
+        drift = 100 - sum(pct.values())
+        if drift != 0 and pct:
+            top_key = max(pct, key=pct.get)
+            pct[top_key] = max(0, pct[top_key] + drift)
+        top = max(contribs, key=contribs.get)
+        explanations.append(
+            {
+                "topIngredient": top,
+                "topLabel": INGREDIENT_LABELS[top],
+                "contributions": pct,
+            }
+        )
+    return explanations

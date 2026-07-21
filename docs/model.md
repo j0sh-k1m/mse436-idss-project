@@ -43,6 +43,8 @@ When the roster has more than nine players, the backend first scores everyone wi
 
 Per-slot and overall scores are the assigned cells of the blended matrix, normalized by total slider weight and scaled to **0–100** so different strategies remain comparable.
 
+Each assigned slot also ships an **explanation**: the weighted ingredient that contributed most to that (player, slot) score, plus percent shares across active ingredients. The UI uses these for “Why: Speed” badges and hover tooltips so a coach can see *why* a strategy would move someone — not only that the order changed.
+
 ## Provenance
 
 - Training / visualization: `notebooks/slot_scoring_model.ipynb`

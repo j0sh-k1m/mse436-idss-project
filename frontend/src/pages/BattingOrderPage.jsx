@@ -3,6 +3,7 @@ import { useBattingOrder } from '../hooks/useBattingOrder'
 import BattingOrderList from '../components/BattingOrderList'
 import LineupAlternatives from '../components/LineupAlternatives'
 import RosterStatusPanel from '../components/RosterStatusPanel'
+import { slotLabel } from '../utils/decisionViz'
 
 const LINEUP_SIZE = 9
 
@@ -15,9 +16,10 @@ export default function BattingOrderPage() {
   const {
     order,
     locked,
-    scoresByPlayerId,
-    overallScore,
+    explanationsByPlayerId,
     changes,
+    changeSummary,
+    movesByPlayerId,
     alternatives,
     selectedAlternativeId,
     loading,
@@ -44,16 +46,12 @@ export default function BattingOrderPage() {
           <div className="page-header-copy">
             <h2>Batting Order</h2>
             <p className="page-hint">
-              Generate three strategy options, pick one, then lock slots or drag to override. Use
-              Customize to try your own weight mix against the same three.
+              Generate three strategy options, pick one, then lock slots or drag to override. Move
+              badges and “Why” drivers show how each choice would change your lineup — and which
+              trait drove each slot.
             </p>
           </div>
           <div className="page-header-actions">
-            {order.length > 0 && (
-              <p className="score-headline">
-                Score <span className="score-headline-value">{overallScore}</span>/100
-              </p>
-            )}
             <button
               type="button"
               className="btn-primary"
@@ -108,21 +106,24 @@ export default function BattingOrderPage() {
                 <h3>Refine selected lineup</h3>
                 <p className="refine-hint">
                   Lock batters you want to keep, drag unlocked rows to override, then regenerate to
-                  re-optimize around those locks.
+                  re-optimize around those locks. Hover a “Why” badge for the ingredient mix behind
+                  that slot.
                 </p>
               </div>
 
               {changes.length > 0 && (
-                <p className="changes-banner">
-                  Changed:{' '}
-                  {changes
-                    .map(
-                      (c) =>
-                        `#${c.slot + 1} (${playerName(playersById, c.from)} → ${playerName(playersById, c.to)})`,
-                    )
-                    .join(', ')}
+                <p className="changes-banner decision-changes">
+                  <span className="changes-banner-label">How this choice changes the lineup:</span>{' '}
+                  {changeSummary.length > 0
+                    ? changeSummary.join(' · ')
+                    : changes
+                        .map(
+                          (c) =>
+                            `${slotLabel(c.slot)}: ${playerName(playersById, c.from)} → ${playerName(playersById, c.to)}`,
+                        )
+                        .join(' · ')}
                   {locked.length > 0 &&
-                    `, ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
+                    ` · ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
                   <button
                     type="button"
                     className="dismiss-btn"
@@ -141,7 +142,8 @@ export default function BattingOrderPage() {
                     players={players}
                     order={order}
                     locked={locked}
-                    scoresByPlayerId={scoresByPlayerId}
+                    explanationsByPlayerId={explanationsByPlayerId}
+                    movesByPlayerId={movesByPlayerId}
                     onReorder={reorder}
                     onToggleLock={toggleLock}
                   />

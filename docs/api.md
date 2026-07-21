@@ -48,12 +48,20 @@ Response shape (GET / working state):
   "locked": [{ "slot": 0, "playerId": "p7" }],
   "scores": [72, 65, 58, 60, 55, 48, 44, 40, 38],
   "overallScore": 53,
-  "bench": ["p8", "p10"]
+  "bench": ["p8", "p10"],
+  "explanations": [
+    {
+      "topIngredient": "speed",
+      "topLabel": "Speed",
+      "contributions": { "trad": 35, "speed": 45, "offense": 20 }
+    }
+  ]
 }
 ```
 
 - `order` — nine player ids in batting-slot order (index 0 = leadoff).
 - `scores[i]` — 0–100 score for `order[i]`.
+- `explanations[i]` — which strategy ingredient most drove placing `order[i]` in that slot (plus contribution shares).
 - `locked` — 0-based `{ slot, playerId }` pairs the coach pinned.
 - `bench` — roster players who did not make the starting nine.
 

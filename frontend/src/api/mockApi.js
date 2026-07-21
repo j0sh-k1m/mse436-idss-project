@@ -72,6 +72,7 @@ export function selectBattingOrder(alternative) {
       overallScore: alternative.overallScore,
       bench: alternative.bench ?? [],
       locked: alternative.locked ?? [],
+      explanations: alternative.explanations ?? [],
     }),
   })
 }

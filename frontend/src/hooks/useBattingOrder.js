@@ -191,6 +191,43 @@ export function useBattingOrder() {
     [order],
   )
 
+  /** Swap a bench player into the weakest unlocked slot and lock them there. */
+  const promoteFromBench = useCallback(
+    (playerId) => {
+      if (!playerId || order.includes(playerId) || order.length === 0) return false
+
+      const lockedSlots = new Set(locked.map((l) => l.slot))
+      let target = -1
+      let bestScore = Infinity
+      for (let i = 0; i < order.length; i++) {
+        if (lockedSlots.has(i)) continue
+        const score = scoresByPlayerId[order[i]] ?? 0
+        if (score < bestScore) {
+          bestScore = score
+          target = i
+        }
+      }
+      if (target === -1) {
+        setError('Unlock a lineup slot before promoting a bench player.')
+        return false
+      }
+
+      setOrder((prev) => {
+        const next = [...prev]
+        next[target] = playerId
+        return next
+      })
+      setLocked((prev) => {
+        const cleared = prev.filter((l) => l.slot !== target && l.playerId !== playerId)
+        return [...cleared, { slot: target, playerId }]
+      })
+      setError(null)
+      clearGenerated(STALE_LINEUP)
+      return true
+    },
+    [order, locked, scoresByPlayerId, clearGenerated],
+  )
+
   const dismissChanges = useCallback(() => {
     setChanges([])
     setPreviousOrder([])
@@ -235,6 +272,7 @@ export function useBattingOrder() {
     selectAlternative,
     reorder,
     toggleLock,
+    promoteFromBench,
     dismissChanges,
     dismissStaleNotice,
     invalidateForRosterChange,

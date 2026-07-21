@@ -37,7 +37,7 @@ Presets (Balanced, Small-ball, Max offense) are the fixed compare options in the
 
 ## Rosters larger than nine
 
-When the roster has more than nine players, the backend first scores everyone with a strategy-weighted **starter value** (same ingredients: closest-prototype fit, power, speed, OBP+SLG quality). Locked players always make the starting nine. The remaining seats go to the highest-value players; everyone else is returned on the **bench**. The 9×9 slot assignment then runs only on the selected starters.
+When the roster has more than nine players, the backend first scores everyone with a strategy-weighted **starter value** (power, speed, and OBP+SLG quality — not slot-prototype distance). Locked players always make the starting nine. The remaining seats go to the highest-value players; everyone else is returned on the **bench**. Prototype fit is applied only in the 9×9 slot assignment on the selected starters, so elite all-around bats are not cut for looking “unprototypical.”
 
 ## Scores shown in the UI
 

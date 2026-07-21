@@ -1,14 +1,21 @@
+import { useEffect, useMemo, useRef } from 'react'
 import { useRoster } from '../hooks/useRoster'
 import { useBattingOrder } from '../hooks/useBattingOrder'
 import BattingOrderList from '../components/BattingOrderList'
 import LineupAlternatives from '../components/LineupAlternatives'
 import RosterStatusPanel from '../components/RosterStatusPanel'
-import { slotLabel } from '../utils/decisionViz'
 
 const LINEUP_SIZE = 9
+const ROSTER_SIG_KEY = 'lineupCoachRosterSig'
 
-function playerName(playersById, id) {
-  return playersById.get(id)?.name ?? 'an empty slot'
+function rosterSignature(players) {
+  return players
+    .map(
+      (p) =>
+        `${p.id}:${p.ratings.contact}-${p.ratings.power}-${p.ratings.discipline}-${p.ratings.speed}`,
+    )
+    .sort()
+    .join('|')
 }
 
 export default function BattingOrderPage() {
@@ -17,11 +24,10 @@ export default function BattingOrderPage() {
     order,
     locked,
     explanationsByPlayerId,
-    changes,
-    changeSummary,
     movesByPlayerId,
     alternatives,
     selectedAlternativeId,
+    staleNotice,
     loading,
     error,
     customWeights,
@@ -31,13 +37,46 @@ export default function BattingOrderPage() {
     selectAlternative,
     reorder,
     toggleLock,
-    dismissChanges,
+    dismissStaleNotice,
+    invalidateForRosterChange,
   } = useBattingOrder()
 
   const busy = rosterLoading || loading
   const canGenerate = players.length >= LINEUP_SIZE && !busy
   const playersById = new Map(players.map((p) => [p.id, p]))
   const hasOptions = alternatives.length > 0
+  const rosterSig = useMemo(() => rosterSignature(players), [players])
+  const prevRosterSig = useRef(null)
+
+  // Wipe generated compare/chips when the roster changes after a generate.
+  useEffect(() => {
+    if (rosterLoading) return
+
+    const saved = sessionStorage.getItem(ROSTER_SIG_KEY)
+
+    if (prevRosterSig.current === null) {
+      prevRosterSig.current = rosterSig
+      if (saved && saved !== rosterSig) {
+        sessionStorage.removeItem(ROSTER_SIG_KEY)
+        invalidateForRosterChange()
+      } else if (hasOptions) {
+        sessionStorage.setItem(ROSTER_SIG_KEY, rosterSig)
+      }
+      return
+    }
+
+    if (prevRosterSig.current !== rosterSig) {
+      const shouldInvalidate = hasOptions || Boolean(saved)
+      prevRosterSig.current = rosterSig
+      sessionStorage.removeItem(ROSTER_SIG_KEY)
+      if (shouldInvalidate) invalidateForRosterChange()
+      return
+    }
+
+    if (hasOptions) {
+      sessionStorage.setItem(ROSTER_SIG_KEY, rosterSig)
+    }
+  }, [rosterSig, rosterLoading, hasOptions, invalidateForRosterChange])
 
   return (
     <section className="page batting-order-page">
@@ -77,7 +116,7 @@ export default function BattingOrderPage() {
 
       {(error || rosterError) && <p className="error-banner">{error || rosterError}</p>}
 
-      {!hasOptions && !busy && players.length >= LINEUP_SIZE && (
+      {!hasOptions && !staleNotice && !busy && players.length >= LINEUP_SIZE && (
         <p className="empty-options-banner">
           Hit <strong>Generate options</strong> to compare Balanced, Small-ball, and Max offense
           lineups.
@@ -91,6 +130,7 @@ export default function BattingOrderPage() {
           <LineupAlternatives
             alternatives={alternatives}
             selectedId={selectedAlternativeId}
+            currentOrder={order}
             playersById={playersById}
             onSelect={selectAlternative}
             disabled={busy}
@@ -111,30 +151,6 @@ export default function BattingOrderPage() {
                 </p>
               </div>
 
-              {changes.length > 0 && (
-                <p className="changes-banner decision-changes">
-                  <span className="changes-banner-label">How this choice changes the lineup:</span>{' '}
-                  {changeSummary.length > 0
-                    ? changeSummary.join(' · ')
-                    : changes
-                        .map(
-                          (c) =>
-                            `${slotLabel(c.slot)}: ${playerName(playersById, c.from)} → ${playerName(playersById, c.to)}`,
-                        )
-                        .join(' · ')}
-                  {locked.length > 0 &&
-                    ` · ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
-                  <button
-                    type="button"
-                    className="dismiss-btn"
-                    onClick={dismissChanges}
-                    aria-label="Dismiss changes summary"
-                  >
-                    ×
-                  </button>
-                </p>
-              )}
-
               <div className="refine-layout">
                 <div className="refine-lineup">
                   <h4 className="refine-col-label">Lineup &amp; locks</h4>
@@ -153,6 +169,20 @@ export default function BattingOrderPage() {
             </section>
           )}
         </>
+      )}
+
+      {staleNotice && (
+        <div className="stale-toast" role="status">
+          <p>{staleNotice}</p>
+          <button
+            type="button"
+            className="dismiss-btn"
+            onClick={dismissStaleNotice}
+            aria-label="Dismiss notice"
+          >
+            ×
+          </button>
+        </div>
       )}
     </section>
   )

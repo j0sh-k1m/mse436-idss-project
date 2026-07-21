@@ -30,8 +30,9 @@ function slotDiffCount(baselineOrder, order) {
 }
 
 function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, disabled }) {
-  const diffs = alt.id === baseline?.id || !baseline ? 0 : slotDiffCount(baseline.order, alt.order)
-  const moves = baseline && alt.id !== baseline.id ? playerMoves(baseline.order, alt.order) : new Map()
+  const isBaseline = Boolean(baseline && (alt.id === baseline.id || selected))
+  const diffs = !baseline || isBaseline ? 0 : slotDiffCount(baseline.order, alt.order)
+  const moves = baseline && !isBaseline ? playerMoves(baseline.order, alt.order) : new Map()
   const priority = strategyPriority(alt.weights)
 
   return (
@@ -59,7 +60,8 @@ function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, dis
       <ol className="alternative-order">
         {alt.order.map((playerId, index) => {
           const player = alt._playersById?.get(playerId)
-          const changed = baseline?.order?.length > 0 && playerId !== baseline.order[index]
+          const changed =
+            !isBaseline && baseline?.order?.length > 0 && playerId !== baseline.order[index]
           const move = moves.get(playerId)
           const explanation = alt.explanations?.[index]
           const why = explanationSummary(explanation)
@@ -114,6 +116,7 @@ function AlternativeCard({ alt, baseline, baselineLabel, selected, onSelect, dis
 export default function LineupAlternatives({
   alternatives,
   selectedId,
+  currentOrder = [],
   playersById,
   onSelect,
   disabled = false,
@@ -126,7 +129,13 @@ export default function LineupAlternatives({
 
   if (!alternatives?.length) return null
 
-  const baseline = alternatives.find((a) => a.preset === 'Balanced') ?? alternatives[0]
+  const selectedAlt = alternatives.find((a) => a.id === selectedId) ?? null
+  const baseline = selectedAlt
+    ? selectedAlt
+    : currentOrder.length > 0
+      ? { id: '__current__', order: currentOrder, label: 'current lineup' }
+      : null
+  const baselineLabel = baseline?.label ?? 'current lineup'
   const enriched = alternatives.map((alt) => ({ ...alt, _playersById: playersById }))
 
   return (
@@ -135,7 +144,9 @@ export default function LineupAlternatives({
         <h3>Compare options</h3>
         <p className="alternatives-hint">
           Each strategy prioritizes different traits — hover a batter to see which ingredient drove
-          their slot. Move badges show how a choice would change the order vs {baseline.label}.
+          their slot. Move badges show how a choice would change the order vs your{' '}
+          {selectedAlt ? 'current selection' : 'current lineup'}. Pick one with{' '}
+          <strong>Use this lineup</strong> to apply it.
         </p>
       </div>
 
@@ -145,7 +156,7 @@ export default function LineupAlternatives({
             key={alt.id}
             alt={alt}
             baseline={baseline}
-            baselineLabel={baseline.label}
+            baselineLabel={baselineLabel}
             selected={alt.id === selectedId}
             onSelect={onSelect}
             disabled={disabled}

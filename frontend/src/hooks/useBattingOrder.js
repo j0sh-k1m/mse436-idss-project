@@ -4,6 +4,11 @@ import { playerMoves, slotLabel } from '../utils/decisionViz'
 
 const DEFAULT_WEIGHTS = { trad: 1.0, power: 0.0, speed: 0.0, offense: 0.3 }
 
+const STALE_LINEUP =
+  'Lineup updated. Regenerate options to refresh strategy comparisons and decision chips.'
+const STALE_ROSTER =
+  'Roster updated. Regenerate options to refresh strategy comparisons and decision chips.'
+
 function diffOrder(prev, next) {
   const changes = []
   const len = Math.max(prev.length, next.length)
@@ -32,14 +37,6 @@ function explanationsMapFromResult(result) {
   return map
 }
 
-function pickSelectedId(alts, preferCustom) {
-  if (preferCustom) {
-    const custom = alts.find((a) => a.label === 'Custom')
-    if (custom) return custom.id
-  }
-  return alts.find((a) => a.preset === 'Balanced')?.id ?? alts[0]?.id ?? null
-}
-
 export function useBattingOrder() {
   const [order, setOrder] = useState([])
   const [locked, setLocked] = useState([])
@@ -50,6 +47,7 @@ export function useBattingOrder() {
   const [previousOrder, setPreviousOrder] = useState([])
   const [alternatives, setAlternatives] = useState([])
   const [selectedAlternativeId, setSelectedAlternativeId] = useState(null)
+  const [staleNotice, setStaleNotice] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [customWeights, setCustomWeights] = useState(DEFAULT_WEIGHTS)
@@ -60,6 +58,16 @@ export function useBattingOrder() {
     setOverallScore(result.overallScore)
     setScoresByPlayerId(scoresMapFromResult(result))
     setExplanationsByPlayerId(explanationsMapFromResult(result))
+  }, [])
+
+  const clearGenerated = useCallback((notice) => {
+    setAlternatives([])
+    setSelectedAlternativeId(null)
+    setChanges([])
+    setPreviousOrder([])
+    setExplanationsByPlayerId({})
+    setScoresByPlayerId({})
+    setStaleNotice(notice)
   }, [])
 
   const refresh = useCallback(() => {
@@ -96,22 +104,21 @@ export function useBattingOrder() {
     (preferCustom) => {
       setLoading(true)
       setError(null)
-      const previous = order
       const options = preferCustom ? { customWeights } : {}
       return api
         .generateBattingOrder(locked, options)
         .then((result) => {
-          setPreviousOrder(previous)
-          applyResult(result)
-          setChanges(diffOrder(previous, result.order))
-          const alts = result.alternatives ?? []
-          setAlternatives(alts)
-          setSelectedAlternativeId(pickSelectedId(alts, preferCustom))
+          // Show compare cards only — do not auto-select or overwrite the working lineup.
+          setAlternatives(result.alternatives ?? [])
+          setSelectedAlternativeId(null)
+          setChanges([])
+          setPreviousOrder([])
+          setStaleNotice(null)
         })
         .catch((err) => setError(err.message || 'Failed to generate batting order'))
         .finally(() => setLoading(false))
     },
-    [locked, order, applyResult, customWeights],
+    [locked, customWeights],
   )
 
   const generate = useCallback(() => runGenerate(false), [runGenerate])
@@ -140,14 +147,19 @@ export function useBattingOrder() {
     [selectedAlternativeId, order, applyResult],
   )
 
-  const reorder = useCallback((fromIndex, toIndex) => {
-    setOrder((prev) => {
-      const next = [...prev]
-      const [moved] = next.splice(fromIndex, 1)
-      next.splice(toIndex, 0, moved)
-      return next
-    })
-  }, [])
+  const reorder = useCallback(
+    (fromIndex, toIndex) => {
+      if (fromIndex === toIndex) return
+      setOrder((prev) => {
+        const next = [...prev]
+        const [moved] = next.splice(fromIndex, 1)
+        next.splice(toIndex, 0, moved)
+        return next
+      })
+      clearGenerated(STALE_LINEUP)
+    },
+    [clearGenerated],
+  )
 
   // Locked entries pin a *player*, not a raw index — after a drag reorders
   // the array, resync each lock's slot number to wherever that player ended up.
@@ -184,6 +196,12 @@ export function useBattingOrder() {
     setPreviousOrder([])
   }, [])
 
+  const dismissStaleNotice = useCallback(() => setStaleNotice(null), [])
+
+  const invalidateForRosterChange = useCallback(() => {
+    clearGenerated(STALE_ROSTER)
+  }, [clearGenerated])
+
   const movesByPlayerId = useMemo(
     () => (changes.length > 0 ? playerMoves(previousOrder, order) : new Map()),
     [changes, previousOrder, order],
@@ -206,6 +224,7 @@ export function useBattingOrder() {
     movesByPlayerId,
     alternatives,
     selectedAlternativeId,
+    staleNotice,
     loading,
     error,
     customWeights,
@@ -217,6 +236,8 @@ export function useBattingOrder() {
     reorder,
     toggleLock,
     dismissChanges,
+    dismissStaleNotice,
+    invalidateForRosterChange,
     slotLabel,
   }
 }

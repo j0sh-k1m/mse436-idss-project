@@ -15,6 +15,7 @@ frontend hooks work unchanged once they switch from the mock to ``fetch``:
   players who did not make the lineup.
 - ``POST /batting-order`` also returns ``alternatives``: the fixed compare
   presets (Balanced, Small-ball, Max offense) plus an optional Custom lineup.
+  Generate does not select a working lineup; the coach commits one via select.
 
 Roster and batting-order state persist to ``data/app_state.json`` so they
 survive server restarts.
@@ -394,29 +395,16 @@ def get_batting_order() -> BattingOrderState:
 
 @app.post("/batting-order")
 def generate_batting_order(req: GenerateRequest) -> GenerateResponse:
-    """Generate the fixed compare presets (and optional Custom) for the coach.
+    """Generate compare presets (and optional Custom) without selecting one.
 
-    Persists the Balanced lineup as the working order; the coach can select a
-    different alternative via ``POST /batting-order/select``.
+    The working batting order is unchanged until the coach commits via
+    ``POST /batting-order/select``.
     """
-    global batting_order_state
     custom = resolve_custom_weights(req.customWeights) if req.customWeights is not None else None
     alternatives = build_alternatives(req.locked, custom)
     if not alternatives:
         raise HTTPException(status_code=500, detail="No lineup alternatives produced")
 
-    primary = next((a for a in alternatives if a.label == "Custom"), None)
-    if primary is None:
-        primary = next((a for a in alternatives if a.preset == DEFAULT_PRESET), alternatives[0])
-    batting_order_state = BattingOrderState(
-        order=primary.order,
-        locked=list(primary.locked),
-        scores=primary.scores,
-        overallScore=primary.overallScore,
-        bench=primary.bench,
-        explanations=list(primary.explanations),
-    )
-    persist()
     return GenerateResponse(**batting_order_state.model_dump(), alternatives=alternatives)
 
 

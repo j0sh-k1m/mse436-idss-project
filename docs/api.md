@@ -113,8 +113,8 @@ Optional custom strategy:
 }
 ```
 
-- Without `customWeights`, returns the three fixed presets; working state is set to **Balanced**.
-- With `customWeights`, also returns **Custom** and sets the working state to that lineup.
+- Without `customWeights`, returns the three fixed presets. The working lineup is **not** changed until the coach selects one.
+- With `customWeights`, also returns **Custom**. Still does not auto-select.
 - Requires **at least nine** players on the roster (409 otherwise).
 - Unknown ingredients or conflicting locks → 422.
 

@@ -121,15 +121,7 @@ Trait → feature mapping and scoring details: [`docs/model.md`](docs/model.md).
 
 ## Model / methodology
 
-The recommender is an interpretable assignment model, not a neural net. Six batting features (OBP, SLG, ISO, BB%, K%, SB/game) and nine slot prototypes are learned offline from recent MLB starters and shipped in `slot_scoring.json`. Coach 1–5 traits are mapped into that feature space in [`backend/model/ratings.py`](backend/model/ratings.py); weighted scoring ingredients (traditional fit, power, speed, offense) are blended and assigned with the Hungarian algorithm in [`backend/model/batting_order.py`](backend/model/batting_order.py). Full write-up: [`docs/model.md`](docs/model.md).
-
-## Team
-
-| Name | Focus area |
-|------|------------|
-| [Name] | Backend / model |
-| [Name] | Frontend / UI |
-| [Name] | Data / notebooks |
+The recommender is an assignment model. Six batting features (OBP, SLG, ISO, BB%, K%, SB/game) and nine slot prototypes are learned offline from MLB games and shipped in `slot_scoring.json`. Coach will rate their players on four different stats on a scale from 1–5; traits are mapped into that feature space (Six batting features) in [`backend/model/ratings.py`](backend/model/ratings.py); weighted scoring ingredients (traditional fit, power, speed, offense) are blended and assigned with the Hungarian algorithm in [`backend/model/batting_order.py`](backend/model/batting_order.py). Full write-up: [`docs/model.md`](docs/model.md).
 
 ## AI Use Disclosure
 

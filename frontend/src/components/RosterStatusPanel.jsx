@@ -4,9 +4,11 @@ import { initials } from '../utils/initials'
  * Compact roster reference for the batting-order refine step.
  * Shows who is starting vs benched for the selected lineup.
  */
-export default function RosterStatusPanel({ players, order, locked }) {
+export default function RosterStatusPanel({ players, order, locked, onPromoteFromBench, busy }) {
   const inLineup = new Set(order)
   const lockedPlayers = new Set(locked.map((l) => l.playerId))
+  const lockedSlots = new Set(locked.map((l) => l.slot))
+  const canPromote = order.length > 0 && lockedSlots.size < order.length
   const starters = order
     .map((id, slot) => {
       const player = players.find((p) => p.id === id)
@@ -20,8 +22,8 @@ export default function RosterStatusPanel({ players, order, locked }) {
       <header className="roster-status-header">
         <h3>Roster</h3>
         <p className="roster-status-hint">
-          Lock players in the lineup on the left. Regenerate to re-pick the nine around those locks.
-          Manage ratings on the Roster tab.
+          Lock players in the lineup on the left. Use Start on the bench to force someone into the
+          nine, then regenerate. Manage ratings on the Roster tab.
         </p>
       </header>
 
@@ -74,6 +76,21 @@ export default function RosterStatusPanel({ players, order, locked }) {
                   C{player.ratings.contact} P{player.ratings.power} D{player.ratings.discipline} S
                   {player.ratings.speed}
                 </span>
+                {onPromoteFromBench && (
+                  <button
+                    type="button"
+                    className="roster-status-promote"
+                    disabled={busy || !canPromote}
+                    title={
+                      canPromote
+                        ? 'Swap into the weakest unlocked slot and lock them there'
+                        : 'Unlock a lineup slot to promote from the bench'
+                    }
+                    onClick={() => onPromoteFromBench(player.id)}
+                  >
+                    Start
+                  </button>
+                )}
               </li>
             ))}
           </ul>

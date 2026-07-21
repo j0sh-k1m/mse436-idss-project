@@ -71,18 +71,23 @@ def blended_matrix(features, weights):
 def starter_values(features, weights):
     """Strategy-weighted value of each player for making the starting nine.
 
-    Uses the same ingredients as the slot model (closest-prototype fit, power,
-    speed, overall OBP+SLG quality), blended with the user's weights, so an
-    Aggressive strategy prefers different bench cutoffs than Small-ball.
+    Uses absolute talent (z-scored power / speed / OBP+SLG), blended with the
+    user's weights, so Aggressive / Small-ball / Max offense prefer different
+    bench cutoffs. Deliberately does **not** use slot-prototype distance: that
+    signal is for ordering the nine, and it penalizes elite all-around players
+    who sit far from every specialized slot fingerprint (so a 5/5/5/5 bat would
+    lose the cut to average "shape matches" under Balanced).
     """
     features = np.asarray(features, dtype=float)
     Z = (features - SCALER_MEAN) / SCALER_STD
 
-    dist = np.sqrt(((Z[:, None, :] - PROTOTYPES[None, :, :]) ** 2).sum(axis=2))
-    trad = minmax(-dist.min(axis=1))
+    # Overall bat quality stands in for "trad" at the cut stage — productive
+    # hitters make the nine; prototype shape is applied later in recommend_order.
+    offense_z = Z[:, FEATURES.index("obp")] + Z[:, FEATURES.index("slg")]
+    trad = minmax(offense_z)
     power = minmax(Z[:, FEATURES.index("iso")])
     speed = minmax(Z[:, FEATURES.index("sb_pg")])
-    offense = minmax(Z[:, FEATURES.index("obp")] + Z[:, FEATURES.index("slg")])
+    offense = minmax(offense_z)
 
     return (
         weights.get("trad", 0.0) * trad

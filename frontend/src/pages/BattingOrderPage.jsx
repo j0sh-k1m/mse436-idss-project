@@ -37,6 +37,7 @@ export default function BattingOrderPage() {
     selectAlternative,
     reorder,
     toggleLock,
+    promoteFromBench,
     dismissStaleNotice,
     invalidateForRosterChange,
   } = useBattingOrder()
@@ -164,7 +165,13 @@ export default function BattingOrderPage() {
                     onToggleLock={toggleLock}
                   />
                 </div>
-                <RosterStatusPanel players={players} order={order} locked={locked} />
+                <RosterStatusPanel
+                  players={players}
+                  order={order}
+                  locked={locked}
+                  onPromoteFromBench={promoteFromBench}
+                  busy={busy}
+                />
               </div>
             </section>
           )}

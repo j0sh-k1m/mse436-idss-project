@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Start the FastAPI backend and Vite frontend together.
+# Usage (from repo root):  ./dev
+# Stop both with Ctrl+C.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+API_PORT="${API_PORT:-8001}"
+UI_PORT="${UI_PORT:-5173}"
+
+backend_pid=""
+frontend_pid=""
+
+cleanup() {
+  [[ -n "$frontend_pid" ]] && kill "$frontend_pid" 2>/dev/null || true
+  [[ -n "$backend_pid" ]] && kill "$backend_pid" 2>/dev/null || true
+  wait 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+# --- one-time setup ---
+
+if [[ ! -d .venv ]]; then
+  echo "→ creating .venv"
+  python3 -m venv .venv
+fi
+# shellcheck disable=SC1091
+source .venv/bin/activate
+
+if ! python -c "import fastapi" 2>/dev/null; then
+  echo "→ installing backend dependencies"
+  pip install -r backend/requirements.txt
+fi
+
+# Vite needs Node 20.19+ or 22.12+ (see frontend/package.json engines).
+if [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+  # shellcheck disable=SC1090
+  source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+  nvm use
+fi
+
+node_major="$(node -p "process.versions.node.split('.')[0]" 2>/dev/null || echo 0)"
+if (( node_major < 20 )); then
+  echo "error: Node $(node -v 2>/dev/null || echo '?') is too old (need 20.19+ or 22.12+)." >&2
+  echo "  Run: nvm install && nvm use" >&2
+  exit 1
+fi
+
+if [[ ! -d frontend/node_modules ]]; then
+  echo "→ installing frontend dependencies"
+  (cd frontend && npm install)
+fi
+
+if [[ ! -f frontend/.env ]]; then
+  cp frontend/.env.example frontend/.env
+  echo "→ created frontend/.env"
+fi
+
+# --- start servers ---
+
+echo "→ API  http://127.0.0.1:${API_PORT}"
+(cd backend && exec uvicorn app:app --reload --host 127.0.0.1 --port "$API_PORT") &
+backend_pid=$!
+
+echo "→ UI   http://127.0.0.1:${UI_PORT}  (Node $(node -v))"
+(cd frontend && exec npm run dev -- --host 127.0.0.1 --port "$UI_PORT") &
+frontend_pid=$!
+
+echo
+echo "Softball Lineup Coach is running. Press Ctrl+C to stop."
+wait

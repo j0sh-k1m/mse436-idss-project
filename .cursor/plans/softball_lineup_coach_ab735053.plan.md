@@ -25,7 +25,7 @@ todos:
     status: pending
   - id: phase-7
     content: "Create docs/ folder and fill README sections: Running locally, Team, AI Use Disclosure."
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -38,7 +38,7 @@ A coach manages a **9-player roster**, rates each player on **4 simple 1-5 trait
 ## Locked decisions
 
 - **Player input:** simple 1-5 ratings; `ratings.py` maps them to the model's 6 features (Option B).
-- **Roster size:** exactly 9 players, matching the model's 9 slots.
+- **Roster size:** unlimited; the batting order is always 9 slots. Extra players are evaluated and benched.
 
 ## Architecture
 

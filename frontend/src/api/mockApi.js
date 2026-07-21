@@ -55,12 +55,26 @@ export function getBattingOrder() {
 }
 
 /** @param {Array<{slot: number, playerId: string}>} locked
- *  @param {{ weights?: Record<string, number>, preset?: string }} [strategy] */
-export function generateBattingOrder(locked, strategy = {}) {
+ *  @param {{ customWeights?: Record<string, number> }} [options] */
+export function generateBattingOrder(locked, options = {}) {
   const body = { locked }
-  if (strategy.weights) body.weights = strategy.weights
-  else if (strategy.preset) body.preset = strategy.preset
+  if (options.customWeights) body.customWeights = options.customWeights
   return request('/batting-order', { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** Commit one compared alternative as the working batting order. */
+export function selectBattingOrder(alternative) {
+  return request('/batting-order/select', {
+    method: 'POST',
+    body: JSON.stringify({
+      order: alternative.order,
+      scores: alternative.scores,
+      overallScore: alternative.overallScore,
+      bench: alternative.bench ?? [],
+      locked: alternative.locked ?? [],
+      explanations: alternative.explanations ?? [],
+    }),
+  })
 }
 
 export function getPresets() {

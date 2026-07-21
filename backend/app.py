@@ -8,9 +8,14 @@ Response shapes intentionally mirror ``frontend/src/api/mockApi.js`` so the
 frontend hooks work unchanged once they switch from the mock to ``fetch``:
 
 - players are ``{id, name, ratings: {contact, power, discipline, speed}}``
-- batting order state is ``{order, locked, scores, overallScore}`` where
-  ``order`` is player ids by slot, ``scores[i]`` scores ``order[i]``, and
-  ``locked`` entries are ``{slot, playerId}`` with 0-based slots.
+- batting order state is ``{order, locked, scores, overallScore, bench,
+  explanations}`` where ``order`` is the starting nine by slot,
+  ``scores[i]`` / ``explanations[i]`` describe ``order[i]``, ``locked`` entries
+  are ``{slot, playerId}`` with 0-based slots, and ``bench`` lists roster
+  players who did not make the lineup.
+- ``POST /batting-order`` also returns ``alternatives``: the fixed compare
+  presets (Balanced, Small-ball, Max offense) plus an optional Custom lineup.
+  Generate does not select a working lineup; the coach commits one via select.
 
 Roster and batting-order state persist to ``data/app_state.json`` so they
 survive server restarts.
@@ -25,7 +30,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 import store
-from model.batting_order import N_SLOTS, PRESETS, recommend_order, score_lineup
+from model.batting_order import (
+    N_SLOTS,
+    PRESETS,
+    explain_assignment,
+    recommend_order,
+    score_lineup,
+    select_starters,
+    starter_values,
+)
 from model.ratings import roster_to_features
 
 app = FastAPI(title="Softball Lineup Coach API")
@@ -76,10 +89,17 @@ class LockEntry(BaseModel):
 
 class GenerateRequest(BaseModel):
     locked: list[LockEntry] = []
-    # Slider weights over the model ingredients; defaults to the Balanced
-    # preset when neither weights nor preset is given.
-    weights: dict[str, float] | None = None
-    preset: str | None = None
+    # Optional custom ingredient weights; when set, a "Custom" alternative is
+    # included alongside the fixed compare presets.
+    customWeights: dict[str, float] | None = None
+
+
+class SlotExplanation(BaseModel):
+    """Why the model put a player in this batting slot."""
+
+    topIngredient: str
+    topLabel: str
+    contributions: dict[str, int] = {}
 
 
 class BattingOrderState(BaseModel):
@@ -87,6 +107,42 @@ class BattingOrderState(BaseModel):
     locked: list[LockEntry]
     scores: list[int]
     overallScore: int
+    # Players on the roster who did not make the starting nine.
+    bench: list[str] = []
+    # Parallel to ``order`` / ``scores``: ingredient driver for each slot.
+    explanations: list[SlotExplanation] = []
+
+
+class LineupAlternative(BaseModel):
+    """One candidate lineup for the coach to compare and choose among."""
+
+    id: str
+    label: str
+    preset: str | None = None
+    weights: dict[str, float]
+    order: list[str]
+    scores: list[int]
+    overallScore: int
+    bench: list[str] = []
+    locked: list[LockEntry] = []
+    explanations: list[SlotExplanation] = []
+
+
+class GenerateResponse(BattingOrderState):
+    """Primary lineup plus alternative strategies for side-by-side comparison."""
+
+    alternatives: list[LineupAlternative] = []
+
+
+class SelectRequest(BaseModel):
+    """Commit one of the generated alternatives as the working batting order."""
+
+    order: list[str]
+    scores: list[int]
+    overallScore: int
+    bench: list[str] = []
+    locked: list[LockEntry] = []
+    explanations: list[SlotExplanation] = []
 
 
 # --------------------------------------------------------------------------
@@ -95,6 +151,8 @@ class BattingOrderState(BaseModel):
 
 _INGREDIENTS = {"trad", "power", "speed", "offense"}
 DEFAULT_PRESET = "Balanced"
+# Fixed strategies shown for comparison (Aggressive is intentionally omitted).
+COMPARE_PRESETS = ("Balanced", "Small-ball", "Max offense")
 
 DEFAULT_ROSTER = [
     ("Jordan Ruiz", dict(contact=4, power=3, discipline=4, speed=5)),
@@ -106,9 +164,10 @@ DEFAULT_ROSTER = [
     ("Taylor Nguyen", dict(contact=5, power=4, discipline=4, speed=5)),
     ("Drew Falk", dict(contact=2, power=5, discipline=5, speed=2)),
     ("Emerson Cole", dict(contact=3, power=2, discipline=2, speed=5)),
+    ("Parker Voss", dict(contact=4, power=3, discipline=4, speed=3)),
 ]
 
-EMPTY_STATE = BattingOrderState(order=[], locked=[], scores=[], overallScore=0)
+EMPTY_STATE = BattingOrderState(order=[], locked=[], scores=[], overallScore=0, bench=[])
 
 players: list[Player] = []
 next_player_number = 1
@@ -130,57 +189,128 @@ def find_player(player_id: str) -> Player:
     raise HTTPException(status_code=404, detail=f"Player {player_id} not found")
 
 
-def resolve_weights(req: GenerateRequest) -> dict[str, float]:
-    if req.weights is not None:
-        unknown = set(req.weights) - _INGREDIENTS
-        if unknown:
-            raise HTTPException(status_code=422, detail=f"Unknown ingredients: {sorted(unknown)}")
-        if all(w == 0 for w in req.weights.values()):
-            raise HTTPException(status_code=422, detail="At least one weight must be non-zero")
-        return req.weights
-    preset = req.preset or DEFAULT_PRESET
-    if preset not in PRESETS:
-        raise HTTPException(status_code=422, detail=f"Unknown preset: {preset}")
-    return PRESETS[preset]
+def resolve_custom_weights(weights: dict[str, float]) -> dict[str, float]:
+    unknown = set(weights) - _INGREDIENTS
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown ingredients: {sorted(unknown)}")
+    if all(w == 0 for w in weights.values()):
+        raise HTTPException(status_code=422, detail="At least one weight must be non-zero")
+    return weights
+
+
+def build_alternatives(
+    locked: list[LockEntry],
+    custom_weights: dict[str, float] | None = None,
+) -> list[LineupAlternative]:
+    """Build the fixed compare presets, plus an optional Custom lineup.
+
+    Duplicate orders (same nine in the same slots) are dropped so the coach
+    only compares meaningfully different options.
+    """
+    strategies: list[tuple[str, str | None, dict[str, float]]] = []
+    for name in COMPARE_PRESETS:
+        if name not in PRESETS:
+            raise HTTPException(status_code=500, detail=f"Missing compare preset: {name}")
+        strategies.append((name, name, PRESETS[name]))
+
+    if custom_weights is not None:
+        strategies.append(("Custom", None, custom_weights))
+
+    alternatives: list[LineupAlternative] = []
+    seen_orders: set[tuple[str, ...]] = set()
+    for i, (label, preset, weights) in enumerate(strategies):
+        state = generate_state(locked, weights)
+        key = tuple(state.order)
+        if key in seen_orders and label != "Custom":
+            continue
+        seen_orders.add(key)
+        alternatives.append(
+            LineupAlternative(
+                id=f"alt-{i}",
+                label=label,
+                preset=preset,
+                weights=weights,
+                order=state.order,
+                scores=state.scores,
+                overallScore=state.overallScore,
+                bench=state.bench,
+                locked=list(state.locked),
+                explanations=list(state.explanations),
+            )
+        )
+    return alternatives
 
 
 def generate_state(locked: list[LockEntry], weights: dict[str, float]) -> BattingOrderState:
-    if len(players) != N_SLOTS:
+    if len(players) < N_SLOTS:
         raise HTTPException(
             status_code=409,
-            detail=f"Batting order needs exactly {N_SLOTS} players; roster has {len(players)}",
+            detail=f"Batting order needs at least {N_SLOTS} players; roster has {len(players)}",
         )
 
     index_by_id = {p.id: i for i, p in enumerate(players)}
-    locks: dict[int, int] = {}
+    locked_roster_indices: list[int] = []
     seen_slots: set[int] = set()
+    seen_players: set[str] = set()
     for entry in locked:
         if entry.playerId not in index_by_id:
             raise HTTPException(status_code=422, detail=f"Locked player {entry.playerId} not on roster")
         if entry.slot in seen_slots:
             raise HTTPException(status_code=422, detail=f"Slot {entry.slot} locked twice")
-        seen_slots.add(entry.slot)
-        p_idx = index_by_id[entry.playerId]
-        if p_idx in locks:
+        if entry.playerId in seen_players:
             raise HTTPException(status_code=422, detail=f"Player {entry.playerId} locked twice")
-        locks[p_idx] = entry.slot + 1  # model slots are 1-based
+        seen_slots.add(entry.slot)
+        seen_players.add(entry.playerId)
+        locked_roster_indices.append(index_by_id[entry.playerId])
 
-    features = roster_to_features([p.ratings.model_dump() for p in players])
+    if len(locked_roster_indices) > N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot lock more than {N_SLOTS} players into the batting order",
+        )
+
+    # Evaluate the whole roster, keep the best nine (locks always make the cut),
+    # then run the 9-slot assignment only on that starting group.
+    all_features = roster_to_features([p.ratings.model_dump() for p in players])
+    values = starter_values(all_features, weights)
+    starter_idxs = select_starters(
+        len(players), values, n_slots=N_SLOTS, must_include=locked_roster_indices
+    )
+    starters = [players[i] for i in starter_idxs]
+    features = all_features[starter_idxs]
+
+    starter_id_to_row = {p.id: i for i, p in enumerate(starters)}
+    locks = {starter_id_to_row[entry.playerId]: entry.slot + 1 for entry in locked}
+
     slots, matrix = recommend_order(features, weights, locks or None)
     scores, overall = score_lineup(matrix, slots, weights)
+    explanations = [
+        SlotExplanation.model_validate(e)
+        for e in explain_assignment(features, weights, slots)
+    ]
 
     order = [""] * N_SLOTS
     for p_idx, slot in enumerate(slots):
-        order[slot - 1] = players[p_idx].id
+        order[slot - 1] = starters[p_idx].id
 
-    return BattingOrderState(order=order, locked=locked, scores=scores, overallScore=overall)
+    starter_ids = set(order)
+    bench = [p.id for p in players if p.id not in starter_ids]
+
+    return BattingOrderState(
+        order=order,
+        locked=locked,
+        scores=scores,
+        overallScore=overall,
+        bench=bench,
+        explanations=explanations,
+    )
 
 
 def prune_player_references(player_id: str) -> None:
     """Drop locks that point at a removed player and refresh the stored state."""
     global batting_order_state
     remaining = [l for l in batting_order_state.locked if l.playerId != player_id]
-    if len(players) == N_SLOTS:
+    if len(players) >= N_SLOTS:
         batting_order_state = generate_state(remaining, PRESETS[DEFAULT_PRESET])
     else:
         batting_order_state = EMPTY_STATE
@@ -197,7 +327,7 @@ def bootstrap() -> None:
         raw_order = saved.get("batting_order")
         if raw_order:
             batting_order_state = BattingOrderState.model_validate(raw_order)
-        elif len(players) == N_SLOTS:
+        elif len(players) >= N_SLOTS:
             batting_order_state = generate_state([], PRESETS[DEFAULT_PRESET])
         else:
             batting_order_state = EMPTY_STATE
@@ -264,10 +394,65 @@ def get_batting_order() -> BattingOrderState:
 
 
 @app.post("/batting-order")
-def generate_batting_order(req: GenerateRequest) -> BattingOrderState:
+def generate_batting_order(req: GenerateRequest) -> GenerateResponse:
+    """Generate compare presets (and optional Custom) without selecting one.
+
+    The working batting order is unchanged until the coach commits via
+    ``POST /batting-order/select``.
+    """
+    custom = resolve_custom_weights(req.customWeights) if req.customWeights is not None else None
+    alternatives = build_alternatives(req.locked, custom)
+    if not alternatives:
+        raise HTTPException(status_code=500, detail="No lineup alternatives produced")
+
+    return GenerateResponse(**batting_order_state.model_dump(), alternatives=alternatives)
+
+
+@app.post("/batting-order/select")
+def select_batting_order(req: SelectRequest) -> BattingOrderState:
+    """Commit a compared alternative as the working batting order."""
     global batting_order_state
-    weights = resolve_weights(req)
-    batting_order_state = generate_state(req.locked, weights)
+
+    if len(req.order) != N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Order must have exactly {N_SLOTS} players; got {len(req.order)}",
+        )
+    if len(req.scores) != N_SLOTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Scores must have exactly {N_SLOTS} values; got {len(req.scores)}",
+        )
+    if len(set(req.order)) != N_SLOTS:
+        raise HTTPException(status_code=422, detail="Order contains duplicate players")
+
+    roster_ids = {p.id for p in players}
+    unknown = [pid for pid in req.order if pid not in roster_ids]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown players in order: {unknown}")
+    unknown_bench = [pid for pid in req.bench if pid not in roster_ids]
+    if unknown_bench:
+        raise HTTPException(status_code=422, detail=f"Unknown players on bench: {unknown_bench}")
+
+    for entry in req.locked:
+        if entry.playerId not in roster_ids:
+            raise HTTPException(
+                status_code=422, detail=f"Locked player {entry.playerId} not on roster"
+            )
+        if entry.playerId not in req.order or req.order[entry.slot] != entry.playerId:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Lock for {entry.playerId} does not match order slot {entry.slot}",
+            )
+
+    batting_order_state = BattingOrderState(
+        order=req.order,
+        locked=req.locked,
+        scores=req.scores,
+        overallScore=req.overallScore,
+        bench=req.bench,
+        explanations=req.explanations,
+    )
     persist()
     return batting_order_state
 

@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '../api/mockApi'
+import { playerMoves, slotLabel } from '../utils/decisionViz'
 
 const DEFAULT_WEIGHTS = { trad: 1.0, power: 0.0, speed: 0.0, offense: 0.3 }
+
+const STALE_LINEUP =
+  'Lineup updated. Regenerate options to refresh strategy comparisons and decision chips.'
+const STALE_ROSTER =
+  'Roster updated. Regenerate options to refresh strategy comparisons and decision chips.'
 
 function diffOrder(prev, next) {
   const changes = []
@@ -14,30 +20,54 @@ function diffOrder(prev, next) {
   return changes
 }
 
+function scoresMapFromResult(result) {
+  const map = {}
+  result.order.forEach((playerId, i) => {
+    map[playerId] = result.scores[i]
+  })
+  return map
+}
+
+function explanationsMapFromResult(result) {
+  const map = {}
+  const explanations = result.explanations ?? []
+  result.order.forEach((playerId, i) => {
+    if (explanations[i]) map[playerId] = explanations[i]
+  })
+  return map
+}
+
 export function useBattingOrder() {
   const [order, setOrder] = useState([])
   const [locked, setLocked] = useState([])
   const [scoresByPlayerId, setScoresByPlayerId] = useState({})
+  const [explanationsByPlayerId, setExplanationsByPlayerId] = useState({})
   const [overallScore, setOverallScore] = useState(0)
   const [changes, setChanges] = useState([])
+  const [previousOrder, setPreviousOrder] = useState([])
+  const [alternatives, setAlternatives] = useState([])
+  const [selectedAlternativeId, setSelectedAlternativeId] = useState(null)
+  const [staleNotice, setStaleNotice] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [presets, setPresets] = useState({})
-  const [activePreset, setActivePreset] = useState('Balanced')
-  const [weights, setWeights] = useState(DEFAULT_WEIGHTS)
+  const [customWeights, setCustomWeights] = useState(DEFAULT_WEIGHTS)
 
   const applyResult = useCallback((result) => {
     setOrder(result.order)
     setLocked(result.locked)
     setOverallScore(result.overallScore)
-    // Batting score is a property of the player, not the slot, so index it by
-    // playerId — that way it stays correct even after a local drag-reorder
-    // that hasn't been sent back through generateBattingOrder yet.
-    const map = {}
-    result.order.forEach((playerId, i) => {
-      map[playerId] = result.scores[i]
-    })
-    setScoresByPlayerId(map)
+    setScoresByPlayerId(scoresMapFromResult(result))
+    setExplanationsByPlayerId(explanationsMapFromResult(result))
+  }, [])
+
+  const clearGenerated = useCallback((notice) => {
+    setAlternatives([])
+    setSelectedAlternativeId(null)
+    setChanges([])
+    setPreviousOrder([])
+    setExplanationsByPlayerId({})
+    setScoresByPlayerId({})
+    setStaleNotice(notice)
   }, [])
 
   const refresh = useCallback(() => {
@@ -58,56 +88,78 @@ export function useBattingOrder() {
     api
       .getPresets()
       .then((loaded) => {
-        setPresets(loaded)
         const balanced = loaded.Balanced
-        if (balanced) {
-          setWeights({ ...balanced })
-          setActivePreset('Balanced')
-        }
+        if (balanced) setCustomWeights({ ...balanced })
       })
-      .catch((err) => setError(err.message || 'Failed to load strategy presets'))
+      .catch(() => {
+        // Presets are only used to seed custom sliders; ignore load failures.
+      })
   }, [])
 
-  const selectPreset = useCallback(
-    (name) => {
-      const presetWeights = presets[name]
-      if (!presetWeights) return
-      setActivePreset(name)
-      setWeights({ ...presetWeights })
+  const setCustomWeight = useCallback((key, value) => {
+    setCustomWeights((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const runGenerate = useCallback(
+    (preferCustom) => {
+      setLoading(true)
+      setError(null)
+      const options = preferCustom ? { customWeights } : {}
+      return api
+        .generateBattingOrder(locked, options)
+        .then((result) => {
+          // Show compare cards only — do not auto-select or overwrite the working lineup.
+          setAlternatives(result.alternatives ?? [])
+          setSelectedAlternativeId(null)
+          setChanges([])
+          setPreviousOrder([])
+          setStaleNotice(null)
+        })
+        .catch((err) => setError(err.message || 'Failed to generate batting order'))
+        .finally(() => setLoading(false))
     },
-    [presets],
+    [locked, customWeights],
   )
 
-  const setWeight = useCallback((key, value) => {
-    setActivePreset(null)
-    setWeights((prev) => ({ ...prev, [key]: value }))
-  }, [])
+  const generate = useCallback(() => runGenerate(false), [runGenerate])
+  const generateWithCustom = useCallback(() => runGenerate(true), [runGenerate])
 
-  const generate = useCallback(() => {
-    setLoading(true)
-    setError(null)
-    const previous = order
-    const strategy = activePreset
-      ? { preset: activePreset }
-      : { weights }
-    return api
-      .generateBattingOrder(locked, strategy)
-      .then((result) => {
-        applyResult(result)
-        setChanges(diffOrder(previous, result.order))
+  const selectAlternative = useCallback(
+    (alternative) => {
+      if (!alternative || alternative.id === selectedAlternativeId) return
+      setLoading(true)
+      setError(null)
+      const previous = order
+      return api
+        .selectBattingOrder(alternative)
+        .then((result) => {
+          setPreviousOrder(previous)
+          applyResult(result)
+          setChanges(diffOrder(previous, result.order))
+          setSelectedAlternativeId(alternative.id)
+          if (alternative.label === 'Custom' && alternative.weights) {
+            setCustomWeights({ ...alternative.weights })
+          }
+        })
+        .catch((err) => setError(err.message || 'Failed to select lineup'))
+        .finally(() => setLoading(false))
+    },
+    [selectedAlternativeId, order, applyResult],
+  )
+
+  const reorder = useCallback(
+    (fromIndex, toIndex) => {
+      if (fromIndex === toIndex) return
+      setOrder((prev) => {
+        const next = [...prev]
+        const [moved] = next.splice(fromIndex, 1)
+        next.splice(toIndex, 0, moved)
+        return next
       })
-      .catch((err) => setError(err.message || 'Failed to generate batting order'))
-      .finally(() => setLoading(false))
-  }, [locked, order, applyResult, activePreset, weights])
-
-  const reorder = useCallback((fromIndex, toIndex) => {
-    setOrder((prev) => {
-      const next = [...prev]
-      const [moved] = next.splice(fromIndex, 1)
-      next.splice(toIndex, 0, moved)
-      return next
-    })
-  }, [])
+      clearGenerated(STALE_LINEUP)
+    },
+    [clearGenerated],
+  )
 
   // Locked entries pin a *player*, not a raw index — after a drag reorders
   // the array, resync each lock's slot number to wherever that player ended up.
@@ -139,25 +191,53 @@ export function useBattingOrder() {
     [order],
   )
 
-  const dismissChanges = useCallback(() => setChanges([]), [])
+  const dismissChanges = useCallback(() => {
+    setChanges([])
+    setPreviousOrder([])
+  }, [])
+
+  const dismissStaleNotice = useCallback(() => setStaleNotice(null), [])
+
+  const invalidateForRosterChange = useCallback(() => {
+    clearGenerated(STALE_ROSTER)
+  }, [clearGenerated])
+
+  const movesByPlayerId = useMemo(
+    () => (changes.length > 0 ? playerMoves(previousOrder, order) : new Map()),
+    [changes, previousOrder, order],
+  )
+
+  const changeSummary = useMemo(() => {
+    if (!changes.length) return []
+    const moves = playerMoves(previousOrder, order)
+    return [...moves.values()].map((m) => m.label)
+  }, [changes, previousOrder, order])
 
   return {
     order,
     locked,
     scoresByPlayerId,
+    explanationsByPlayerId,
     overallScore,
     changes,
+    changeSummary,
+    movesByPlayerId,
+    alternatives,
+    selectedAlternativeId,
+    staleNotice,
     loading,
     error,
-    presets,
-    activePreset,
-    weights,
-    selectPreset,
-    setWeight,
+    customWeights,
+    setCustomWeight,
     refresh,
     generate,
+    generateWithCustom,
+    selectAlternative,
     reorder,
     toggleLock,
     dismissChanges,
+    dismissStaleNotice,
+    invalidateForRosterChange,
+    slotLabel,
   }
 }

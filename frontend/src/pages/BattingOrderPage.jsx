@@ -1,18 +1,21 @@
+import { useEffect, useMemo, useRef } from 'react'
 import { useRoster } from '../hooks/useRoster'
 import { useBattingOrder } from '../hooks/useBattingOrder'
 import BattingOrderList from '../components/BattingOrderList'
+import LineupAlternatives from '../components/LineupAlternatives'
+import RosterStatusPanel from '../components/RosterStatusPanel'
 
-const INGREDIENT_LABELS = {
-  trad: 'Traditional fit',
-  power: 'Power',
-  speed: 'Speed',
-  offense: 'Offense (PA share)',
-}
+const LINEUP_SIZE = 9
+const ROSTER_SIG_KEY = 'lineupCoachRosterSig'
 
-const ROSTER_SIZE = 9
-
-function playerName(playersById, id) {
-  return playersById.get(id)?.name ?? 'an empty slot'
+function rosterSignature(players) {
+  return players
+    .map(
+      (p) =>
+        `${p.id}:${p.ratings.contact}-${p.ratings.power}-${p.ratings.discipline}-${p.ratings.speed}`,
+    )
+    .sort()
+    .join('|')
 }
 
 export default function BattingOrderPage() {
@@ -20,137 +23,166 @@ export default function BattingOrderPage() {
   const {
     order,
     locked,
-    scoresByPlayerId,
-    overallScore,
-    changes,
+    explanationsByPlayerId,
+    movesByPlayerId,
+    alternatives,
+    selectedAlternativeId,
+    staleNotice,
     loading,
     error,
-    presets,
-    activePreset,
-    weights,
-    selectPreset,
-    setWeight,
+    customWeights,
+    setCustomWeight,
     generate,
+    generateWithCustom,
+    selectAlternative,
     reorder,
     toggleLock,
-    dismissChanges,
+    dismissStaleNotice,
+    invalidateForRosterChange,
   } = useBattingOrder()
 
   const busy = rosterLoading || loading
-  const canGenerate = players.length === ROSTER_SIZE && !busy
+  const canGenerate = players.length >= LINEUP_SIZE && !busy
   const playersById = new Map(players.map((p) => [p.id, p]))
-  const presetNames = Object.keys(presets)
+  const hasOptions = alternatives.length > 0
+  const rosterSig = useMemo(() => rosterSignature(players), [players])
+  const prevRosterSig = useRef(null)
+
+  // Wipe generated compare/chips when the roster changes after a generate.
+  useEffect(() => {
+    if (rosterLoading) return
+
+    const saved = sessionStorage.getItem(ROSTER_SIG_KEY)
+
+    if (prevRosterSig.current === null) {
+      prevRosterSig.current = rosterSig
+      if (saved && saved !== rosterSig) {
+        sessionStorage.removeItem(ROSTER_SIG_KEY)
+        invalidateForRosterChange()
+      } else if (hasOptions) {
+        sessionStorage.setItem(ROSTER_SIG_KEY, rosterSig)
+      }
+      return
+    }
+
+    if (prevRosterSig.current !== rosterSig) {
+      const shouldInvalidate = hasOptions || Boolean(saved)
+      prevRosterSig.current = rosterSig
+      sessionStorage.removeItem(ROSTER_SIG_KEY)
+      if (shouldInvalidate) invalidateForRosterChange()
+      return
+    }
+
+    if (hasOptions) {
+      sessionStorage.setItem(ROSTER_SIG_KEY, rosterSig)
+    }
+  }, [rosterSig, rosterLoading, hasOptions, invalidateForRosterChange])
 
   return (
     <section className="page batting-order-page">
       <header className="page-header">
         <div className="page-header-top">
-          <h2>Batting Order</h2>
-          <p className="score-headline">
-            Lineup batting score: <span className="score-headline-value">{overallScore}</span>/100
-          </p>
-        </div>
-        <p className="page-hint">
-          Pick a strategy, lock any slots you want to keep, then generate. Drag unlocked rows to
-          override the model&apos;s suggestion.
-        </p>
-      </header>
-
-      <section className="strategy-panel" aria-label="Lineup strategy">
-        <h3>Strategy</h3>
-        <div className="preset-row" role="group" aria-label="Strategy presets">
-          {presetNames.map((name) => (
-            <button
-              key={name}
-              type="button"
-              className={`preset-btn${activePreset === name ? ' active' : ''}`}
-              aria-pressed={activePreset === name}
-              onClick={() => selectPreset(name)}
-              disabled={busy}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-
-        <div className="weight-sliders">
-          {Object.keys(INGREDIENT_LABELS).map((key) => (
-            <label className="weight-slider" key={key}>
-              <span className="weight-label">
-                {INGREDIENT_LABELS[key]}
-                <span className="weight-value">{Number(weights[key] ?? 0).toFixed(1)}</span>
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={weights[key] ?? 0}
-                onChange={(e) => setWeight(key, Number(e.target.value))}
-                disabled={busy}
-              />
-            </label>
-          ))}
-        </div>
-
-        <div className="strategy-actions">
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={generate}
-            disabled={!canGenerate}
-            title={
-              players.length === ROSTER_SIZE
-                ? undefined
-                : `Need exactly ${ROSTER_SIZE} players (currently ${players.length})`
-            }
-          >
-            Generate order
-          </button>
-          {players.length !== ROSTER_SIZE && (
-            <p className="strategy-guard">
-              Roster must have exactly {ROSTER_SIZE} players before generating
-              (currently {players.length}).
+          <div className="page-header-copy">
+            <h2>Batting Order</h2>
+            <p className="page-hint">
+              Generate three strategy options, pick one, then lock slots or drag to override. Move
+              badges and “Why” drivers show how each choice would change your lineup — and which
+              trait drove each slot.
             </p>
-          )}
+          </div>
+          <div className="page-header-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={generate}
+              disabled={!canGenerate}
+              title={
+                players.length >= LINEUP_SIZE
+                  ? undefined
+                  : `Need at least ${LINEUP_SIZE} players (currently ${players.length})`
+              }
+            >
+              {hasOptions ? 'Regenerate options' : 'Generate options'}
+            </button>
+          </div>
         </div>
-      </section>
+        {players.length < LINEUP_SIZE && (
+          <p className="strategy-guard">
+            Need at least {LINEUP_SIZE} players on the roster (currently {players.length}). Add
+            players on the Roster tab.
+          </p>
+        )}
+      </header>
 
       {(error || rosterError) && <p className="error-banner">{error || rosterError}</p>}
 
-      {changes.length > 0 && (
-        <p className="changes-banner">
-          Changed:{' '}
-          {changes
-            .map(
-              (c) =>
-                `#${c.slot + 1} (${playerName(playersById, c.from)} → ${playerName(playersById, c.to)})`,
-            )
-            .join(', ')}
-          {locked.length > 0 &&
-            `, ${locked.length} slot${locked.length === 1 ? '' : 's'} held by locks.`}
-          <button
-            type="button"
-            className="dismiss-btn"
-            onClick={dismissChanges}
-            aria-label="Dismiss changes summary"
-          >
-            ×
-          </button>
+      {!hasOptions && !staleNotice && !busy && players.length >= LINEUP_SIZE && (
+        <p className="empty-options-banner">
+          Hit <strong>Generate options</strong> to compare Balanced, Small-ball, and Max offense
+          lineups.
         </p>
       )}
 
-      {busy && order.length === 0 ? (
+      {busy && !hasOptions && order.length === 0 ? (
         <p className="loading-banner">Loading…</p>
       ) : (
-        <BattingOrderList
-          players={players}
-          order={order}
-          locked={locked}
-          scoresByPlayerId={scoresByPlayerId}
-          onReorder={reorder}
-          onToggleLock={toggleLock}
-        />
+        <>
+          <LineupAlternatives
+            alternatives={alternatives}
+            selectedId={selectedAlternativeId}
+            currentOrder={order}
+            playersById={playersById}
+            onSelect={selectAlternative}
+            disabled={busy}
+            customWeights={customWeights}
+            onCustomWeightChange={setCustomWeight}
+            onCompareCustom={generateWithCustom}
+            canCompareCustom={canGenerate}
+          />
+
+          {(order.length > 0 || hasOptions) && (
+            <section className="refine-section" aria-label="Refine selected lineup">
+              <div className="refine-header">
+                <h3>Refine selected lineup</h3>
+                <p className="refine-hint">
+                  Lock batters you want to keep, drag unlocked rows to override, then regenerate to
+                  re-optimize around those locks. Hover a “Why” badge for the ingredient mix behind
+                  that slot.
+                </p>
+              </div>
+
+              <div className="refine-layout">
+                <div className="refine-lineup">
+                  <h4 className="refine-col-label">Lineup &amp; locks</h4>
+                  <BattingOrderList
+                    players={players}
+                    order={order}
+                    locked={locked}
+                    explanationsByPlayerId={explanationsByPlayerId}
+                    movesByPlayerId={movesByPlayerId}
+                    onReorder={reorder}
+                    onToggleLock={toggleLock}
+                  />
+                </div>
+                <RosterStatusPanel players={players} order={order} locked={locked} />
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {staleNotice && (
+        <div className="stale-toast" role="status">
+          <p>{staleNotice}</p>
+          <button
+            type="button"
+            className="dismiss-btn"
+            onClick={dismissStaleNotice}
+            aria-label="Dismiss notice"
+          >
+            ×
+          </button>
+        </div>
       )}
     </section>
   )

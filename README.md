@@ -79,7 +79,10 @@ The Vite app calls the FastAPI backend at `VITE_API_BASE_URL` (see [`frontend/.e
 
 **Regenerate learned parameters:** run [`notebooks/slot_scoring_model.ipynb`](notebooks/slot_scoring_model.ipynb) (updates `slot_scoring.json`). Optional analysis notebooks: [`notebooks/exploration.ipynb`](notebooks/exploration.ipynb), [`notebooks/ratings_mapping_variants.ipynb`](notebooks/ratings_mapping_variants.ipynb).
 
-Trait → feature mapping and scoring details: [`docs/model.md`](docs/model.md). API overview: [`docs/api.md`](docs/api.md).
+## Documentation
+
+- [`docs/model.md`](docs/model.md) — trait → feature mapping, scoring ingredients, locks, and how lineups are assigned
+- [`docs/api.md`](docs/api.md) — FastAPI endpoints the UI calls (roster, batting order, presets)
 
 ## How to use the UI
 
@@ -110,14 +113,13 @@ Trait → feature mapping and scoring details: [`docs/model.md`](docs/model.md).
 │   ├── exploration.ipynb
 │   └── ratings_mapping_variants.ipynb
 │
-└── docs/                    Model notes, API notes, deliverables
-    ├── model.md
-    └── api.md
+└── docs/                    See Documentation above (model.md, api.md)
 ```
 
 - `backend/model/` holds the pure decision logic. The frontend should never contain model math.
 - `backend/data/raw/` is gitignored so large downloads stay local; `.gitkeep` keeps the empty folder in git.
 - `notebooks/` is for analysis and regenerating parameters, not production code.
+- Further detail: [`docs/model.md`](docs/model.md), [`docs/api.md`](docs/api.md).
 
 ## Model / methodology
 
@@ -125,4 +127,6 @@ The recommender is an assignment model. Six batting features (OBP, SLG, ISO, BB%
 
 ## AI Use Disclosure
 
-AID Statement: Artificial Intelligence Tool: Claude, Claude Code, Cursor; Data Collection Method: Finding sources of MLB data; Execution: Implementing logic and ideas created by the team through writing code; Writing—Review & Editing: Writing README and other markdown files in the repo.
+AID Statement: Artificial Intelligence Tool: Claude, Claude Code, Cursor; Data Collection Method: Finding sources of MLB data; Execution: Implementing logic and ideas created by the team through writing code; Writing—Review & Editing: Writing README and other markdown files in the repo. 
+
+More Details on AI generated content are in these files: [`backend/model/batting_order.py`](backend/model/batting_order.py). Full write-up: [`docs/model.md`](docs/model.md)
